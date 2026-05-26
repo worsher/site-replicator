@@ -134,7 +134,7 @@ node scripts/dom-diff.mjs \
 | `styleScore` | 样式匹配率：`styleMatch / (节点对数 × 16个检测属性)`，范围 0~1 |
 | `origCount` | 原始站序列化节点总数 |
 | `cloneCount` | 克隆站序列化节点总数 |
-| `mismatches[].path` | 差异节点路径，格式为 `tag[index]/tag[index]/…` |
+| `mismatches[].path` | 差异节点路径，格式为 `body/tag[index]/tag[index]/…`（根节点为裸标签名，无下标） |
 | `mismatches[].type` | `"structure"`（标签/层级差异）或 `"style"`（计算样式差异） |
 | `mismatches[].prop` | 仅 `type=style` 时存在，差异的 CSS 属性名 |
 | `mismatches[].orig` | 原始站的值（标签名或属性值） |

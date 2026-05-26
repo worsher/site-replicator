@@ -90,10 +90,10 @@
 │       ├── 1440.png             ← 全页截图，视口宽 1440px
 │       ├── 768.png              ← 全页截图，视口宽 768px
 │       └── 375.png              ← 全页截图，视口宽 375px
-├── assets/                      ← download-assets.mjs 下载的静态资源（保留原始路径结构）
-├── asset-map.json               ← { "https://…/foo.css": "assets/foo.css", … }
-├── clone/                       ← L1 克隆产物
-│   └── index.html               ← 引用已重写为本地路径的完整页面
+├── clone/                       # L1 复刻产物（download-assets 的 --out 目标）
+│   ├── index.html               ← 重写引用后的页面
+│   ├── assets/                  ← download-assets.mjs 下载的静态资源（保留原始路径结构）
+│   └── asset-map.json           ← { "https://…/foo.css": "assets/foo.css", … }
 ├── diff-1440.png                ← visual-diff 热力图（各断点各一张）
 ├── diff-768.png
 ├── diff-375.png
@@ -111,7 +111,7 @@
 |:---:|------|------|------|-----------|
 | 1 | 页面抓取 | 目标 URL | `original/`（dom.html、dom-tree.json、network.json、screenshots/） | `scripts/capture.mjs` |
 | 2 | 资源本地化 | network.json、dom.html | `assets/`、asset-map.json、`clone/index.html` | `scripts/download-assets.mjs` |
-| 3 | 反混淆 | clone/index.html、assets/*.js | 理解层；必要时注释/格式化代码 | 浏览器 MCP（交互探查）、Playwright evaluate |
+| 3 | 反混淆 | clone/index.html、clone/assets/*.js | 理解层；必要时注释/格式化代码 | 浏览器 MCP（交互探查）、Playwright evaluate |
 | 4 | 三重对比 | original/screenshots、clone URL、原始 URL | dom-report.json、diff-\<bp\>.png、report.html | `scripts/dom-diff.mjs`、`scripts/visual-diff.mjs` |
 | 5 | 动效复刻 | 反混淆结果、浏览器录制 | 带动效的最终 clone | 浏览器 MCP（录制/回放）、手工编码 |
 
