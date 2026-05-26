@@ -47,4 +47,4 @@ const mismatched = pixelmatch(ca.data, cb.data, diff.data, width, height, {
 writeFileSync(values.out, PNG.sync.write(diff));
 
 const score = 1 - mismatched / (width * height);
-console.log(JSON.stringify({ score, mismatched, width, height }));
+console.log(JSON.stringify({ score, mismatched, width, height, origHeight: a.height, cloneHeight: b.height, origWidth: a.width, cloneWidth: b.width }));

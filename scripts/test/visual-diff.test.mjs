@@ -37,6 +37,6 @@ test('different images score < 1 and write heatmap', async () => {
   const { stdout } = await exec('node', [script, '--orig', a, '--clone', b, '--out', diff], { timeout: 30000 });
   const r = JSON.parse(stdout);
   assert.ok(r.score < 1);
-  assert.ok(r.mismatched > 0);
+  assert.equal(r.mismatched, 256, 'all 16x16 pixels differ');
   assert.ok(existsSync(diff));
 });
