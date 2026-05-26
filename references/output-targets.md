@@ -23,6 +23,7 @@ L1 的成品即 `download-assets.mjs` 的直接产出（见 `03-asset-extraction
 ```
 .site-replicator/<host>/<page-slug>/clone/
 ├── index.html          ← 完整页面，所有外部 URL 已重写为本地路径
+├── asset-map.json      ← 原 URL → 本地路径映射（download-assets.mjs 产出）
 └── assets/
     ├── css/            ← 样式文件
     ├── js/             ← JavaScript 文件

@@ -28,25 +28,24 @@
 
 ### 3.1 JS 格式化
 
-使用 [Prettier](https://prettier.io/) 或 [js-beautify](https://github.com/beautify-web/js-beautify) 对所有下载到 `clone/assets/js/` 下的 `.js` 文件做美化：
+使用 [Prettier](https://prettier.io/) 或 [js-beautify](https://github.com/beautify-web/js-beautify) 对所有下载到 `clone/assets/js/` 下的 `.js` 文件做美化。**原始压缩文件保留在 `clone/assets/` 不动，先复制到 `deobf/` 后再对副本执行格式化。**
 
 ```bash
-# 推荐：prettier（需提前 pnpm add -D prettier）
-npx prettier --write "clone/assets/js/**/*.js" --parser babel
+# Tier 0：先把要美化的资源复制到 deobf/，保留 clone/assets/ 原件不动
+mkdir -p deobf
+cp -r clone/assets deobf/assets
 
-# 备选：js-beautify（安装更轻量）
-npx js-beautify -r clone/assets/js/app.js -o deobf/js/app.js
+# 美化副本（原地作用于 deobf/ 内的拷贝）
+npx prettier --write "deobf/assets/**/*.{js,css}"
+# 或对单个 JS 用 js-beautify（同样作用于副本）
+npx js-beautify -r deobf/assets/js/app.js
 ```
 
-美化后的文件写入 `deobf/js/`（而非覆盖 `clone/assets/js/`，原始文件保留不动）。
+美化后的文件位于 `deobf/assets/`，原始压缩版保留在 `clone/assets/` 不覆盖。
 
 ### 3.2 CSS 格式化
 
-```bash
-npx prettier --write "clone/assets/css/**/*.css" --parser css
-```
-
-格式化后写入 `deobf/css/`。
+CSS 与 JS 一并在上一步的 `cp -r` 和 `prettier --write` 中处理（`deobf/assets/**/*.css`），无需单独再执行。格式化后的 CSS 同样位于 `deobf/assets/css/`。
 
 ### 3.3 sourcemap 还原（若存在）
 
@@ -62,21 +61,14 @@ npx prettier --write "clone/assets/css/**/*.css" --parser css
 
 **还原步骤：**
 
-若 sourcemap 文件是外部文件（如 `app.js.map`），先下载：
+使用 [shuji](https://github.com/paazmaya/shuji) 还原源文件。shuji 读取的是 `.map` sourcemap 文件，而非 `.js` bundle 本身。若 sourcemap 尚未下载，需先获取：通过检查 JS 文件末尾的 `//# sourceMappingURL=` 注释找到 `.map` 文件 URL（或内联 data URI），或直接在 `clone/assets/js/` 目录下查找是否已有 `.map` 文件。
 
 ```bash
-# 若 sourcemap 未被 download-assets.mjs 自动下载（非 script 类型），手动获取
-curl -o deobf/js/app.js.map https://example.com/assets/js/app.js.map
-```
+# 若 sourcemap 未被 download-assets.mjs 自动下载，手动获取
+curl -o clone/assets/js/app.js.map https://example.com/assets/js/app.js.map
 
-使用 [source-map](https://www.npmjs.com/package/source-map) 工具或 [shuji](https://github.com/nicolo-ribaudo/shuji) 还原源文件：
-
-```bash
-# 使用 shuji（专门用于 sourcemap 还原）
-npx shuji clone/assets/js/app.js -o deobf/src/
-
-# 或使用 source-map CLI
-npx source-map-explorer clone/assets/js/app.js deobf/js/app.js.map
+# 使用 shuji 还原（输入 .map 文件，输出到 deobf/src/）
+npx shuji clone/assets/js/app.js.map -o deobf/src/
 ```
 
 成功时，`deobf/src/` 下会出现按原始目录结构组织的源文件（`.ts`、`.vue`、`.jsx` 等）。
@@ -109,7 +101,7 @@ Tier 1 是默认执行的深度反混淆级别，**只处理驱动视觉效果�
 
 ```bash
 # 在格式化后的代码中批量搜索
-grep -rn "requestAnimationFrame\|IntersectionObserver\|ScrollTrigger\|gsap\|Lottie\|Splide" deobf/js/ \
+grep -rn "requestAnimationFrame\|IntersectionObserver\|ScrollTrigger\|gsap\|Lottie\|Splide" deobf/assets/js/ \
   | awk -F: '{print $1}' | sort -u
 ```
 
@@ -131,11 +123,12 @@ Tier 1 **不处理**：数据接口、权限验证、第三方 SDK 初始化逻�
 
 ```
 deobf/
-├── js/                          ← Tier 0 格式化后的完整 JS（原始压缩版备份在 clone/assets/js/）
-│   ├── app.js                   ← 格式化后
-│   └── vendor.js
-├── css/                         ← Tier 0 格式化后的 CSS
-│   └── main.css
+├── assets/                      ← Tier 0：clone/assets/ 的格式化副本
+│   ├── js/                      ← 格式化后的完整 JS（原始压缩版保留在 clone/assets/js/）
+│   │   ├── app.js
+│   │   └── vendor.js
+│   └── css/                     ← 格式化后的 CSS
+│       └── main.css
 ├── src/                         ← Tier 0 sourcemap 还原的源文件（若存在）
 └── tier1/                       ← Tier 1 深度还原的核心动效模块
     ├── animation-core.js        ← 变量重命名 + 控制流恢复后
@@ -160,7 +153,7 @@ Tier 2 应在以下情况下才考虑启用：
 
 | 操作 | 工具/方法 |
 |---|---|
-| 变量重命名（全量） | 基于 AST 的重命名（如 babel-plugin-de-indent 或 Claude 批量处理） |
+| 变量重命名（全量） | 编写自定义 Babel AST transform 脚本，或由 Claude 逐模块阅读格式化后代码、根据语义批量重命名——无现成 off-the-shelf CLI 可完成此步骤 |
 | 控制流平坦化还原 | 识别 Obfuscator.io 的 switch-case 状态机模式，还原为顺序结构 |
 | 字符串数组解码 | 找到字符串数组声明和解码函数，批量替换所有引用位置 |
 | 模块拆分 | 将 webpack bundle 按模块边界（`__webpack_module_factory__`/`__d` 等标记）拆为独立文件 |
@@ -235,8 +228,7 @@ deobf/
 ├── clone/                      ← L1 复刻产物（download-assets.mjs 产物）
 │   └── assets/js/app.js        ← 保留原始压缩版，不覆盖
 └── deobf/                      ← 反混淆产物
-    ├── js/                     ← Tier 0：格式化后的 JS
-    ├── css/                    ← Tier 0：格式化后的 CSS
+    ├── assets/                 ← Tier 0：clone/assets/ 格式化副本（js/、css/ 在其下）
     ├── src/                    ← Tier 0：sourcemap 还原的源文件（若存在）
     ├── tier1/                  ← Tier 1：核心动效模块深度还原
     └── tier2/                  ← Tier 2：全量深度还原（--deep 时才产出）
