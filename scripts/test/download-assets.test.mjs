@@ -46,6 +46,12 @@ test('downloads assets, writes map, rewrites html', async () => {
   assert.match(rewritten, /src="assets\/logo\.png"/);
   assert.ok(!rewritten.includes(srv.url), 'no original origin left in html');
 
+  const css = await readFile(path.join(out, 'assets', 'style.css'), 'utf8');
+  assert.match(css, /url\("assets\/logo\.png"\)/, 'quoted css url() rewritten');
+  assert.match(css, /url\(assets\/logo\.png\)/, 'unquoted css url() rewritten');
+  assert.ok(!css.includes('url("/logo.png")'), 'quoted original url gone');
+  assert.ok(!css.includes('url(/logo.png)'), 'unquoted original url gone');
+
   // document 类型不应被当作静态资源下载
   assert.ok(!existsSync(path.join(out, 'assets', 'index')), 'document not downloaded as a static asset');
 });

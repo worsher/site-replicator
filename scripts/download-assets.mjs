@@ -1,5 +1,6 @@
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { parseArgs } from 'node:util';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 
 const { values } = parseArgs({
@@ -20,13 +21,17 @@ const network = JSON.parse(await readFile(values.network, 'utf8'));
 const seen = new Set();
 const map = {};
 
-// 由 URL 推导本地相对路径（去 query、去前导 /）
+// 由 URL 推导本地相对路径（去前导 /，防目录穿越；带 query 的资源用 query 哈希避免碰撞覆盖）
 function localPathFor(u) {
   const url = new URL(u);
   let p = url.pathname.replace(/^\/+/, '');
   if (!p || p.endsWith('/')) p += 'index';
-  // 防目录穿越
   p = p.split('/').filter((s) => s && s !== '..').join('/');
+  if (url.search) {
+    const h = createHash('sha1').update(url.search).digest('hex').slice(0, 8);
+    const ext = path.extname(p);
+    p = ext ? `${p.slice(0, -ext.length)}-${h}${ext}` : `${p}-${h}`;
+  }
   return path.join('assets', p);
 }
 
@@ -38,7 +43,13 @@ for (const r of network) {
   const rel = localPathFor(r.url);
   const abs = path.join(out, rel);
   await mkdir(path.dirname(abs), { recursive: true });
-  const resp = await fetch(r.url);
+  let resp;
+  try {
+    resp = await fetch(r.url, { signal: AbortSignal.timeout(30000) });
+  } catch (err) {
+    console.error('skip (fetch error):', r.url, err.message);
+    continue;
+  }
   if (!resp.ok) {
     console.error('skip (fetch failed):', r.url, resp.status);
     continue;
@@ -50,15 +61,16 @@ for (const r of network) {
 
 await writeFile(path.join(out, 'asset-map.json'), JSON.stringify(map, null, 2), 'utf8');
 
-// 引用重写：先替换完整绝对 URL；再替换下载到的 css 内部 url(...)
+// 引用重写：长 URL 优先（避免前缀碰撞）；替换绝对 URL、引号包裹的 pathname、以及 url() 形式
 function rewrite(text) {
   let result = text;
-  for (const [orig, local] of Object.entries(map)) {
+  const entries = Object.entries(map).sort(([a], [b]) => b.length - a.length);
+  for (const [orig, local] of entries) {
     result = result.split(orig).join(local);
-    // 同时替换 pathname 形式（相对引用）
     const p = new URL(orig).pathname;
     result = result.split(`"${p}"`).join(`"${local}"`);
     result = result.split(`'${p}'`).join(`'${local}'`);
+    result = result.split(`url(${p})`).join(`url(${local})`);
   }
   return result;
 }

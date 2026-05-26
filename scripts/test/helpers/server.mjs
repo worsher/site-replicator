@@ -27,7 +27,9 @@ const INDEX_HTML = `<!doctype html>
 const STYLE_CSS = `#title { color: rgb(10, 20, 30); font-size: 32px; }
 .box { width: 100px; height: 100px; background: rgb(200, 200, 200); }
 @keyframes spin { from { transform: rotate(0); } to { transform: rotate(360deg); } }
-.box img { animation: spin 2s linear infinite; }`;
+.box img { animation: spin 2s linear infinite; }
+.u-bg-q { background-image: url("/logo.png"); }
+.u-bg-u { background-image: url(/logo.png); }`;
 
 // 启动一个服务于固定 fixture 站点的服务器；返回 { url, close, requests }
 export function startFixtureServer() {
