@@ -24,7 +24,7 @@ after(async () => {
 });
 
 test('capture writes dom, tree, network, screenshots', async () => {
-  await exec('node', [script, srv.url + '/', '--out', out, '--breakpoints', '1440,375']);
+  await exec('node', [script, srv.url + '/', '--out', out, '--breakpoints', '1440,375'], { timeout: 60000 });
 
   const dom = await readFile(path.join(out, 'dom.html'), 'utf8');
   assert.match(dom, /<h1 id="title">Hello<\/h1>/);
@@ -41,4 +41,8 @@ test('capture writes dom, tree, network, screenshots', async () => {
 
   assert.ok(existsSync(path.join(out, 'screenshots', '1440.png')));
   assert.ok(existsSync(path.join(out, 'screenshots', '375.png')));
+});
+
+test('exits non-zero when required args are missing', async () => {
+  await assert.rejects(exec('node', [script], { timeout: 30000 }));
 });
