@@ -55,7 +55,7 @@ export function startFixtureServer() {
       resolve({
         url: `http://127.0.0.1:${port}`,
         requests,
-        close: () => new Promise((r) => server.close(r)),
+        close: () => { server.closeAllConnections(); return new Promise((r) => server.close(r)); },
       });
     });
   });
