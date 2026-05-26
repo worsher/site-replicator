@@ -47,5 +47,5 @@ test('downloads assets, writes map, rewrites html', async () => {
   assert.ok(!rewritten.includes(srv.url), 'no original origin left in html');
 
   // document 类型不应被当作静态资源下载
-  assert.ok(!existsSync(path.join(out, 'assets', 'index.html')));
+  assert.ok(!existsSync(path.join(out, 'assets', 'index')), 'document not downloaded as a static asset');
 });
