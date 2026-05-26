@@ -1,7 +1,7 @@
 ---
 name: site-replicator
 description: 网页 1:1 复刻专家，对线上真实网页做高保真复刻。支持「单页复刻」与「整站发现+筛选+批量复刻」两种模式；复刻管线含 HTML 结构抓取、静态资源罗列下载与本地化、混淆代码分级复原、浏览器结构+样式+像素三重对比、动效提取与复刻。输出支持三层：L1 独立静态站 / L2 融入目标项目 / L3 重建到固定技术栈（默认 Next.js+Tailwind+TS，可配置）。
-allowed-tools: Read, Write, Edit, Glob, Grep, Bash
+allowed-tools: Read, Write, Edit, Glob, Grep, Bash, mcp__plugin_playwright_playwright__*, mcp__ChromeDevTools__*
 ---
 
 ## 简介
@@ -34,6 +34,8 @@ cd ~/.claude/skills/site-replicator/scripts && pnpm install && pnpm exec playwri
 3. **Bash + 脚本**（`scripts/capture.mjs` 等）：最终回退，脚本内置 Playwright 作为无 MCP 环境的兜底。
 
 分工原则：**MCP 负责交互探查/截图/动效录制（看与判断），脚本负责批量下载/像素 diff/DOM diff（算与搬）。**
+
+> **注意**：浏览器 MCP（Playwright / Chrome DevTools）需在宿主环境单独启用；若不可用，自带的 `scripts/`（基于 Playwright）即为无需 MCP 的保底回退路径，核心抓取/对比（capture/dom-diff/visual-diff）均可不依赖 MCP 完成。
 
 ---
 

@@ -18,7 +18,7 @@
 |---|---|---|---|---|
 | **Tier 0** | 恒做（每次必执行） | 所有 JS/CSS 的格式化 + sourcemap 还原 | 低（秒级） | 格式化后全量代码 |
 | **Tier 1** | 默认（智能模式） | 仅驱动视觉/动效的核心模块 | 中（分钟级） | 数个关键模块 |
-| **Tier 2** | `--deep` 选项手动启用 | 全量 JS 深度还原 | 高（数十分钟） | 完整还原代码库 |
+| **Tier 2** | 配置 `deobfuscation: tier2`（或调用参数 `--deobfuscation tier2`）手动启用 | 全量 JS 深度还原 | 高（数十分钟） | 完整还原代码库 |
 
 ---
 
@@ -139,7 +139,7 @@ deobf/
 
 ---
 
-## 五、Tier 2 — 全量深度还原（`--deep` 选项）
+## 五、Tier 2 — 全量深度还原（配置 `deobfuscation: tier2`）
 
 ### 5.1 启用条件
 
@@ -212,7 +212,7 @@ deobf/
                │
          否 ──►│
                ▼
-   升级 Tier 2（--deep）
+   升级 Tier 2（配置 deobfuscation: tier2）
    全量还原后重新分析动效逻辑
 ```
 
@@ -231,7 +231,7 @@ deobf/
     ├── assets/                 ← Tier 0：clone/assets/ 格式化副本（js/、css/ 在其下）
     ├── src/                    ← Tier 0：sourcemap 还原的源文件（若存在）
     ├── tier1/                  ← Tier 1：核心动效模块深度还原
-    └── tier2/                  ← Tier 2：全量深度还原（--deep 时才产出）
+    └── tier2/                  ← Tier 2：全量深度还原（配置 deobfuscation: tier2 时才产出）
 ```
 
 **原始文件（`clone/assets/`）始终保留**，`deobf/` 存放的是可读版本副本，两者互不覆盖，可随时对照验证。

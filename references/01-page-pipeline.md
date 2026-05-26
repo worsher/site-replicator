@@ -187,6 +187,7 @@ node scripts/download-assets.mjs \
 
 # 3. 用本地 HTTP 服务托管 clone（比较时 dom-diff 需要 URL）
 npx serve .site-replicator/example.com/home/clone --listen 3000 &
+# （或任意静态服务器，如离线环境可用：python3 -m http.server -d .site-replicator/example.com/home/clone 3000 &）
 CLONE_URL="http://localhost:3000"
 
 # 4a. 抓取 clone 截图（三断点）
