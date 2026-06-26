@@ -452,4 +452,6 @@ grep -rhoE 'url\([^)]*\)' "$CLONE" --include="*.css" | grep -E "url\\((['\"]?)(h
 3. 导航栏、Hero 区域、核心 CTA 按钮、Footer 的视觉排布与原站一致。
 4. 字体、颜色、间距无肉眼可见偏差。
 
+**逐区块细查辅助**：某区块可疑时，用 `scripts/shot-el.mjs --url <站> --sel <选择器> --out <png>` 对原站与 clone 的同一选择器各截一张（脚本内置慢滚，会触发 scroll-reveal、避免把入场动画截成空白），再用 `scripts/stitch.mjs --a <原图> --b <克隆> --out <拼接图>` 横向并排，比全页热力图更易看出局部偏差。
+
 三个关卡均通过后，方可在 `report.html` 中标记「人工确认：已确认」，并将报告归档。

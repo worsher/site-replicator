@@ -116,6 +116,8 @@ const locs = await page.evaluate(() =>
 3. 限定：只保留同域 URL（`href` 的 hostname 与目标站一致），排除 `#`、`mailto:`、`tel:` 等非页面链接。
 4. 对第一层收集到的 URL，若爬取深度未达限制（**默认深度 2 层**），继续对每个 URL 重复步骤 2~3。
 
+**无浏览器 MCP 时的兜底**：用 `scripts/extract-links.mjs --url <页面> --sel <nav/footer 选择器>` 批量提取容器内链接（输出每条的 text/href/img），再按上面的同域 / 深度规则筛选。同理 `extract-imgs.mjs`、`dump-text.mjs`、`inspect-blocks.mjs` 可在无 MCP 时分别盘点区块的图片、文案、结构（详见 SKILL.md 脚本速查表的「辅助脚本」）。
+
 **爬取深度说明：**
 
 | 层级 | 来源 |

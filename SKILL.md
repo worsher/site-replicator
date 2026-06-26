@@ -88,9 +88,22 @@ cd ~/.claude/skills/site-replicator/scripts && pnpm install && pnpm exec playwri
 | 脚本 | 用途 | CLI | 详见 |
 |---|---|---|---|
 | `capture.mjs` | 多断点截图 + DOM/网络快照 | `node scripts/capture.mjs <url> --out <dir> [--breakpoints 1440,768,375] [--timeout 60000]` | `references/01-page-pipeline.md` |
-| `download-assets.mjs` | 批量下载静态资源并重写引用 | `node scripts/download-assets.mjs --network <network.json> --html <dom.html> --out <dir>` | `references/03-asset-extraction.md` |
+| `download-assets.mjs` | 批量下载静态资源并重写引用（自动滚动补抓 + Referer 破防盗链 + CSS 相对路径） | `node scripts/download-assets.mjs --network <network.json> --html <dom.html> --out <dir> [--referer <page-url>]` | `references/03-asset-extraction.md` |
 | `dom-diff.mjs` | DOM 结构 + 计算样式对比，输出 report.json | `node scripts/dom-diff.mjs --orig <url> --clone <url> --out <report.json>` | `references/05-visual-verification.md` |
 | `visual-diff.mjs` | 像素级差异热力图，输出 diff.png + score | `node scripts/visual-diff.mjs --orig <a.png> --clone <b.png> --out <diff.png> [--threshold 0.1]` | `references/05-visual-verification.md` |
+
+### 辅助脚本（页面分析 / 区块验证，按需调用）
+
+核心五步之外的小工具，用 `--sel` 指定 CSS 选择器聚焦到某区块。**分析类**用于复刻前理解页面结构、盘点文案/图片/链接；**验证类**用于区块级视觉核对：
+
+| 脚本 | 用途 | CLI |
+|---|---|---|
+| `inspect-blocks.mjs` | 滚动后列出区块下各子元素的 tag/class/height/heading，快速定位各 section | `node scripts/inspect-blocks.mjs --url <url> --sel <选择器> [--width 1440]` |
+| `dump-text.mjs` | 提取区块下各子元素的标题 + 正文（≤500 字），盘点文案 | `node scripts/dump-text.mjs --url <url> --sel <选择器>` |
+| `extract-imgs.mjs` | 提取区块内所有 `img` 的 src/alt/尺寸 | `node scripts/extract-imgs.mjs --url <url> --sel <选择器>` |
+| `extract-links.mjs` | 提取区块内链接 text/href/img（整站发现、导航/产品列表盘点） | `node scripts/extract-links.mjs --url <url> --sel <选择器>` |
+| `shot-el.mjs` | 单元素截图（含慢滚触发 scroll-reveal，避免入场动画截成空白），区块级视觉核对 | `node scripts/shot-el.mjs --url <url> --sel <选择器> --out <png> [--width 1440]` |
+| `stitch.mjs` | 两张 PNG 横向拼接，原图 vs 克隆并排目视对比 | `node scripts/stitch.mjs --a <a.png> --b <b.png> --out <png> [--gap 24]` |
 
 ---
 
@@ -106,11 +119,12 @@ cd ~/.claude/skills/site-replicator/scripts && pnpm install && pnpm exec playwri
 
 | 指标 | 门控 |
 |---|---|
+| 资源残留（外链 / 根绝对路径引用） | = 0（确定性硬门控，先过这关） |
 | visual-diff `score`（各断点） | ≥ 0.98 |
 | dom-diff `structureScore` | ≥ 0.90 |
 | dom-diff `styleScore` | ≥ 0.85 |
 
-两个关卡（自动指标 + 人工确认）均通过，方可归档。
+三个关卡（资源体检 + 自动指标 + 人工确认）均通过，方可归档。资源体检为何必须独立：像素/结构/样式分数会被懒加载状态、页面高度差异稀释，单看分数发现不了资源缺失，必须 grep 残留引用确定性兜住（详见 `05` 关卡 0）。
 
 ---
 
