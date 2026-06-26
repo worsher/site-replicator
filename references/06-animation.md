@@ -39,6 +39,32 @@
 
 ---
 
+## ⚠️ 前置：先拆运行态快照的「冻结」与「隐藏」
+
+`capture.mjs` 存的是 `page.content()`——**运行后的 DOM 快照**。JS 组件已经把运行态写进了 DOM，静态复刻时若不还原，会表现为「**模块在原站好好的，在 clone 里消失或错位**」。这往往被误判成资源缺失，实则是组件状态没处理。动效还原之前**先排查这两类**：
+
+### 轮播 / 滑块（Slick、Swiper、Splide 等）
+
+- **症状**：宽度错乱（如 slide 宽 1280 而容器 1710）、出现重复幻灯片、不自动播放。
+- **根因**：DOM 里已有库生成的克隆节点和内联冻结尺寸（基于抓取时的视口），`transform: translate3d(...)`、`width: 1280px` 等被定格；重新加载时库在新视口初始化，与定格值打架。
+- **识别信号**：`*-initialized` / `*-cloned` 类名；`slick-track` / `swiper-wrapper` 上的内联 `transform`/`width`。
+- **处理**：把库生成的 DOM 剥离，**恢复成干净的原始 slide 列表**（去掉 clone 节点、内联尺寸、`*-initialized` 类），让库在页面加载时按当前视口重新初始化（原站的初始化脚本通常已随 JS 一起下载）。
+
+### 滚动揭示（AOS、ScrollReveal、WOW 等）
+
+- **症状**：整块内容在 clone 里**永久不可见**（最易被误报为"丢了一个模块"）。
+- **根因**：元素被库打上初始隐藏态（`opacity:0`、`transform: translateY(..)`、`data-aos`/`data-scroll-reveal`），等滚动事件触发才显现；静态快照定格在隐藏态，触发器未接管就一直隐藏。
+- **识别信号**：大块内容不可见且元素 `opacity:0` 并带 `data-aos` / `data-scroll-reveal` / `wow` 等属性/类。
+- **处理**：若不还原入场动画，最稳的是注入覆盖样式直接显示终态：
+  ```css
+  [data-aos],[data-scroll-reveal],.wow{opacity:1!important;transform:none!important;-webkit-transform:none!important;}
+  ```
+  若要保留动画，则确保库脚本随站加载并能在 clone 上重新绑定。
+
+> 一句话：**“消失的模块”先怀疑 scroll-reveal 隐藏、“错位的轮播”先怀疑冻结 DOM**，确认不是这两类，再进入下面的动效提取。
+
+---
+
 ## 二、Step 1：提取 CSS 动效
 
 ### 2.1 扫描 @keyframes

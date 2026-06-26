@@ -46,9 +46,10 @@ test('downloads assets, writes map, rewrites html', async () => {
   assert.match(rewritten, /src="assets\/logo\.png"/);
   assert.ok(!rewritten.includes(srv.url), 'no original origin left in html');
 
+  // CSS 内 url() 重写为相对该 CSS 文件目录的路径（style.css 与 logo.png 同在 assets/ 下 → logo.png）
   const css = await readFile(path.join(out, 'assets', 'style.css'), 'utf8');
-  assert.match(css, /url\("assets\/logo\.png"\)/, 'quoted css url() rewritten');
-  assert.match(css, /url\(assets\/logo\.png\)/, 'unquoted css url() rewritten');
+  assert.match(css, /url\("logo\.png"\)/, 'quoted css url() rewritten relative to css dir');
+  assert.match(css, /url\(logo\.png\)/, 'unquoted css url() rewritten relative to css dir');
   assert.ok(!css.includes('url("/logo.png")'), 'quoted original url gone');
   assert.ok(!css.includes('url(/logo.png)'), 'unquoted original url gone');
 

@@ -32,6 +32,20 @@
 
 ---
 
+## 资源完整性：三项内置保障（务必理解）
+
+只靠 `network.json` 会漏资源——**懒加载图的真图（`data-original`）和首屏外区块的 CSS 背景图，在抓取时若未滚动到，浏览器从不发起请求**，于是不进 `network.json`，后续无从下载。脚本已内置三道保障，无需手动补救：
+
+| 保障 | 在哪一步 | 解决什么 |
+|---|---|---|
+| **抓取时自动滚动到底再回顶** | `capture.mjs` | 触发懒加载图与视口外区块背景图的真实请求，使其进入 `network.json`；并把占位 `data-original` 替换为真图 |
+| **从 DOM/CSS 解析补抓** | `download-assets.mjs` | 即便仍漏，脚本会扫描 `dom.html` 的 `data-original`/`src`/`srcset` 与已下载 CSS 的 `url()`，把 `network.json` 里没有的引用补download下来 |
+| **请求带 `Referer` + `User-Agent`** | `download-assets.mjs` | 破 CDN 防盗链（裸 `fetch` 常被 403）。`Referer` 优先取 `--referer`，否则从 `network.json` 的 document 请求自动推导 |
+
+> **不要**再依赖"先跑一遍、看 diff 发现塌陷、人工往 network.json 补 URL"的旧流程——那是这套保障出现前的兜底。现在一次 capture+download 即应抓全；仍漏的只剩真正运行时拼接的 URL（见下文"已知局限"）。
+
+---
+
 ## 二、download-assets.mjs 用法
 
 ### 命令格式
@@ -40,10 +54,13 @@
 node scripts/download-assets.mjs \
   --network <network.json 路径> \
   --html    <dom.html 路径> \
-  --out     <输出目录>
+  --out     <输出目录> \
+  --referer <页面 URL>      # 可选：破防盗链；不传则从 network.json 自动推导
 ```
 
 `--html` 参数可选——若提供，脚本在下载完资源后会将 HTML 文件中的 URL 重写为本地路径，并将结果写入 `<out>/index.html`；若不提供，只下载资源、生成 `asset-map.json`，不产出 `index.html`。
+
+`--referer` 参数可选——目标站 CDN 有防盗链时，用它指定页面 URL 作为请求 `Referer`；通常无需手动传，脚本会从 `network.json` 的 document 请求推导。
 
 ### 示例
 
@@ -118,9 +135,13 @@ assets/css/main-<sha1(query 字符串)前8位>.css
 
 这样同一路径、不同版本的资源可以并存，不会互相覆盖。
 
-### 4. CSS 文件内的 url() 递归重写
+### 4. CSS 文件内的 url() 重写（相对该 CSS 文件目录）
 
-所有下载完成的 `.css` 文件，脚本还会对文件内容再做一轮重写，把 CSS 内引用的字体、背景图等 `url()` 路径也替换为本地路径。
+所有下载完成的 `.css` 文件，脚本对其中的字体、背景图 `url()` 重写为本地路径。两个关键点：
+
+- **相对路径按“该 CSS 文件所在目录”计算**，而非 out 根。深层目录的 CSS（如 `assets/.../css/home/en-us/style.css`）若用 out 根相对的 `assets/...`，浏览器会相对 CSS 自身再次解析而 404。脚本用 `path.relative(cssDir, 资源本地路径)` 得出正确的 `../../../images/...`。
+- **根绝对路径（`/public/...`）按该 CSS 自身的 host 解析**，不是页面 host——CSS 常托管在 CDN 子域，其根绝对引用指向 CDN 根而非主站根。
+- **容忍畸形引号**：原站手写 CSS 常见 `url(/path.png')`（缺前引号或多尾引号）这类笔误，脚本有一道 `url()` 兜底正则按 pathname 匹配，规范写法与畸形写法都能本地化。
 
 ---
 
@@ -136,16 +157,16 @@ assets/css/main-<sha1(query 字符串)前8位>.css
 
 每个资源使用 `AbortSignal.timeout(30000)` 限制为 30 秒。CDN 慢速响应或超大文件（如未压缩的 3D 模型）可能超时跳过，并在 stderr 打印 `skip (fetch error): <url>`。超时跳过的资源不会写入 `asset-map.json`，`index.html` 中对应 URL 也不会被重写（仍为原始 CDN 地址）。
 
-### ③ 动态 URL 可能漏抓
+### ③ 仍可能漏抓的动态资源
 
-以下模式生成的资源 URL 不会出现在 `network.json` 中，因而无法被捕获：
+滚动触发 + DOM/CSS 解析补抓已覆盖**懒加载图**和**视口外背景图**。仍会漏的只剩纯运行时生成、静态文本里无迹可寻的资源：
 
-- **动态拼接 URL**：JS 在运行时根据配置/环境变量拼接的 URL（如 `baseURL + '/chunk.' + hash + '.js'`）。
-- **CSS-in-JS 运行时样式**：Styled-components、Emotion 等在运行时向 `<head>` 注入的 `<style>` 标签，内容已内联，无独立文件但其中引用的背景图/字体可能漏抓。
-- **字体子集化**：部分字体服务（如 Google Fonts）根据请求的 `unicode-range` 动态生成子集字体，实际加载的文件 URL 与 HTML 中 `@import` 的 URL 不同，可能只记录了元 URL 而非真实字体文件。
-- **`import()` 动态 chunk**：webpack/Vite 的代码分割产生的懒加载 chunk，仅在用户触发对应路由或操作时才发起请求，如抓取时未触发则不会记录。
+- **运行时拼接 URL**：JS 按配置/环境变量拼出的 URL（`baseURL + '/chunk.' + hash + '.js'`），DOM/CSS 里没有字面量可解析。
+- **CSS-in-JS 运行时样式**：Styled-components、Emotion 等注入 `<head>` 的 `<style>`，其引用的背景图/字体只在运行时存在。
+- **字体子集化**：Google Fonts 等按 `unicode-range` 动态生成子集，实际文件 URL 与 `@import` 的元 URL 不同。
+- **交互触发的 `import()` chunk**：仅在点击/路由切换后才请求的代码分割块（滚动触发不了的那部分）。
 
-**兜底策略**：以上漏抓情况会在 Step 4 的 `dom-diff` / `visual-diff` 中被发现（样式塌陷、字体回退、模块缺失均会反映在评分上）。发现后需人工在 `network.json` 中补充对应 URL，或手动下载并更新 `asset-map.json`，再重新生成 `index.html`。
+**兜底**：以这些为限，用 Step 4 的**资源完整性体检**（`05-visual-verification.md`）主动发现——grep 产物中残留的外链/根绝对路径，命中即逐条用 `--referer` 或手动补抓。不要再把这套兜底当成"每次都要人工补一遍"的常规步骤。
 
 ### ④ 跨 host 同路径资源命名冲突
 

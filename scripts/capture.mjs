@@ -50,6 +50,34 @@ try {
   // best-effort settle for lazy-loaded assets; never hang on persistent connections
   await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {});
 
+  // 自动滚动到底再回顶：触发懒加载图与下方区块的 CSS 背景图请求，
+  // 否则这些资源永不进入 network.json，后续 download-assets 无从下载（懒加载/视口外背景图漏抓的根因）。
+  await page
+    .evaluate(async () => {
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      let last = -1;
+      let same = 0;
+      for (let i = 0; i < 100; i++) {
+        window.scrollBy(0, Math.max(400, Math.floor(window.innerHeight * 0.8)));
+        await sleep(120);
+        const h = document.documentElement.scrollHeight;
+        const atBottom = window.scrollY + window.innerHeight >= h - 2;
+        if (h === last) same++;
+        else { same = 0; last = h; }
+        if (atBottom && same >= 2) break; // 到底且高度连续两轮稳定
+      }
+      // 强制把仍是占位符的懒加载图替换为真实图（让其发起请求并进入截图）
+      document.querySelectorAll('img[data-original],img[data-src]').forEach((img) => {
+        const real = img.getAttribute('data-original') || img.getAttribute('data-src');
+        if (real && (!img.src || img.src.startsWith('data:'))) img.src = real;
+      });
+      window.scrollTo(0, 0);
+      await sleep(200);
+    })
+    .catch(() => {});
+  // 等待滚动触发的新资源落地
+  await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
+
   await writeFile(path.join(out, 'dom.html'), await page.content(), 'utf8');
 
   const tree = await page.evaluate(() => {
