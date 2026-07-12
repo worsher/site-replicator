@@ -18,7 +18,7 @@
 }
 ```
 
-`download-assets.mjs` 在处理 `network.json` 时，**只下载以下 5 种 resourceType**：
+`download-assets.mjs` 在处理 `network.json` 时，**下载以下 5 种 resourceType**：
 
 | resourceType | 说明 |
 |---|---|
@@ -28,19 +28,22 @@
 | `script` | JavaScript 文件 |
 | `media` | 视频、音频等媒体文件 |
 
-以下类型**不下载**：`document`（HTML 文档）、`xhr`、`fetch`（接口请求）、`websocket`、`other` 等。HTTP 状态码 ≥ 400 的请求同样跳过。
+**扩展名兜底**：resourceType 跨 Playwright 版本/手工整理的 network.json 中不可靠，即使类型不在上表，只要 URL pathname 以静态资源扩展名结尾（css/js/图片/字体/媒体），同样会下载。
+
+以下情况**不下载**：`document`（HTML 文档）与无静态扩展名的 `xhr`/`fetch`/`websocket`/`other` 请求；HTTP 状态码 ≥ 400 的请求同样跳过。
 
 ---
 
-## 资源完整性：三项内置保障（务必理解）
+## 资源完整性：四项内置保障（务必理解）
 
-只靠 `network.json` 会漏资源——**懒加载图的真图（`data-original`）和首屏外区块的 CSS 背景图，在抓取时若未滚动到，浏览器从不发起请求**，于是不进 `network.json`，后续无从下载。脚本已内置三道保障，无需手动补救：
+只靠 `network.json` 会漏资源——**懒加载图的真图（`data-original`/`data-lazy-src`）和首屏外区块的 CSS 背景图，在抓取时若未滚动到，浏览器从不发起请求**，于是不进 `network.json`，后续无从下载。脚本已内置四道保障，无需手动补救：
 
 | 保障 | 在哪一步 | 解决什么 |
 |---|---|---|
-| **抓取时自动滚动到底再回顶** | `capture.mjs` | 触发懒加载图与视口外区块背景图的真实请求，使其进入 `network.json`；并把占位 `data-original` 替换为真图 |
-| **从 DOM/CSS 解析补抓** | `download-assets.mjs` | 即便仍漏，脚本会扫描 `dom.html` 的 `data-original`/`src`/`srcset` 与已下载 CSS 的 `url()`，把 `network.json` 里没有的引用补download下来 |
+| **抓取时自动滚动到底再回顶** | `capture.mjs` | 触发懒加载图与视口外区块背景图的真实请求，使其进入 `network.json`；并把占位 `src` 按 `data-original`/`data-src`/`data-lazy-src`/`data-lazysrc`（及 `data-srcset` 变体）替换为真图 |
+| **从 DOM/CSS 解析补抓** | `download-assets.mjs` | 即便仍漏，脚本会扫描 `dom.html` 的 `data-*`/`src`/`srcset` 与已下载 CSS 的 `url()`，把 `network.json` 里没有的引用补抓下来 |
 | **请求带 `Referer` + `User-Agent`** | `download-assets.mjs` | 破 CDN 防盗链（裸 `fetch` 常被 403）。`Referer` 优先取 `--referer`，否则从 `network.json` 的 document 请求自动推导 |
+| **HTML un-lazy 还原（默认开）** | `download-assets.mjs` | 静态 clone 没有懒加载库/服务端 optimizer 运行时：占位 `src` 恢复为真实 `src`/`srcset`、`<script>`/`<link>` 的 `data-src` 恢复、`type="litespeed/javascript"` 改回 `text/javascript`、剥离 `data-no-optimize` 存根脚本。不还原会表现为图片空白、脚本不执行（WordPress + LiteSpeed/lazysizes 站点的高频坑）。用 `--keep-lazy` 可关闭 |
 
 > **不要**再依赖"先跑一遍、看 diff 发现塌陷、人工往 network.json 补 URL"的旧流程——那是这套保障出现前的兜底。现在一次 capture+download 即应抓全；仍漏的只剩真正运行时拼接的 URL（见下文"已知局限"）。
 
@@ -55,12 +58,21 @@ node scripts/download-assets.mjs \
   --network <network.json 路径> \
   --html    <dom.html 路径> \
   --out     <输出目录> \
-  --referer <页面 URL>      # 可选：破防盗链；不传则从 network.json 自动推导
+  --referer <页面 URL>          # 可选：破防盗链；不传则从 network.json 自动推导
+  --map     <asset-map.json>    # 可选：站点级共享 map（整站模式跨页去重）
+  --html-out <文件路径>          # 可选：重写后 HTML 的输出位置（默认 <out>/index.html）
+  --concurrency 8               # 可选：并发下载数（默认 8）
+  --keep-lazy                   # 可选：保留懒加载占位标记，跳过 un-lazy 还原
 ```
 
-`--html` 参数可选——若提供，脚本在下载完资源后会将 HTML 文件中的 URL 重写为本地路径，并将结果写入 `<out>/index.html`；若不提供，只下载资源、生成 `asset-map.json`，不产出 `index.html`。
-
-`--referer` 参数可选——目标站 CDN 有防盗链时，用它指定页面 URL 作为请求 `Referer`；通常无需手动传，脚本会从 `network.json` 的 document 请求推导。
+| 参数 | 说明 |
+|---|---|
+| `--html`（可选） | 提供则下载后将 HTML 中的 URL 重写为本地路径并写出（默认 `<out>/index.html`）；不提供则只下载资源、生成 asset-map，不产出 HTML |
+| `--referer`（可选） | 目标站 CDN 有防盗链时指定页面 URL 作为请求 `Referer`；通常无需手动传，脚本从 `network.json` 的 document 请求推导 |
+| `--map`（可选） | 指向站点级共享 `asset-map.json`：已在 map 且文件已落盘的 URL 跳过下载，新资源追加后写回该文件。多页共用一份 assets/ 的关键（`run-pages.mjs` 即用此参数） |
+| `--html-out`（可选） | 多页共享同一 `--out` 时避免 `index.html` 互相覆盖；HTML 内相对路径按该文件所在目录计算 |
+| `--concurrency`（可选） | 并发下载数，默认 8。资源多的站点（200+ 文件）显著快于顺序下载 |
+| `--keep-lazy`（可选） | 关闭默认的 un-lazy/LiteSpeed 还原（调试对照时用） |
 
 ### 示例
 
@@ -99,10 +111,10 @@ node scripts/download-assets.mjs \
 脚本最后向 stdout 打印一行 JSON：
 
 ```json
-{ "ok": true, "downloaded": 42 }
+{ "ok": true, "downloaded": 42, "mapped": 45, "extra": 3 }
 ```
 
-`downloaded` 为成功写入磁盘的资源数量。
+`downloaded` 为本次成功写入磁盘的资源数量；`mapped` 为 asset-map 中的总条目数（含 `--map` 预载的历史条目）；`extra` 为从 DOM/CSS 解析补抓到的数量（不在 network.json 中的懒加载图/背景图）。
 
 ---
 
@@ -114,15 +126,15 @@ node scripts/download-assets.mjs \
 
 同一页面可能有 `https://cdn.example.com/js/app.js` 和 `https://cdn.example.com/js/app.js.map` 两条记录，前者是后者的前缀子串。按降序处理可保证先替换更长的 URL，不会把短 URL 的替换结果再次误替换。
 
-### 2. 三种匹配形式
-
-对每条 `URL → localPath` 映射，同时替换三种形式：
+### 2. 匹配形式（每条映射同时替换）
 
 ```
-原始完整 URL（绝对 URL）    →  本地相对路径
-"<pathname>"（带双引号的路径）→  "<本地相对路径>"
-'<pathname>'（带单引号的路径）→  '本地相对路径'
+原始完整 URL（绝对 URL）        →  本地相对路径
+//host/path（协议相对 URL）     →  本地相对路径（完整 URL 先替换，剩余的即真·协议相对引用）
+"<pathname>"（带双引号的路径）  →  "<本地相对路径>"
+'<pathname>'（带单引号的路径）  →  '本地相对路径'
 url(<pathname>)（CSS url() 裸路径）→  url(本地相对路径)
+srcset="<URL 描述符>, ..."      →  逐条目重写（一个属性值里多条 URL+描述符，整体不命中引号形式，需按条目处理；含 data-srcset/data-lazy-srcset）
 ```
 
 ### 3. 带 query 参数的资源用 query 哈希命名
@@ -134,6 +146,10 @@ assets/css/main-<sha1(query 字符串)前8位>.css
 ```
 
 这样同一路径、不同版本的资源可以并存，不会互相覆盖。
+
+### 3.5 跨 host 同路径自动隔离
+
+两个不同 CDN 域名使用相同文件路径时（如 `cdn-a.com/js/vendor.js` 与 `cdn-b.com/js/vendor.js`），先到者占用 `assets/js/vendor.js`，后到者自动落到 `assets/<host>/js/vendor.js`（host 中的 `:` 替换为 `_`），两条 URL 在 asset-map 中映射到不同本地文件，互不覆盖。
 
 ### 4. CSS 文件内的 url() 重写（相对该 CSS 文件目录）
 
@@ -149,15 +165,11 @@ assets/css/main-<sha1(query 字符串)前8位>.css
 
 使用 `download-assets.mjs` 时需注意以下真实存在的限制：
 
-### ① 顺序下载，速度受限
+### ① 单个资源 30 秒超时
 
-脚本对所有资源**逐个顺序下载**（`for...of` 循环，非并发），站点资源数量多时（如 200+ 个文件），下载时间会线性增长，整体较慢。目前没有并发控制或进度条，需耐心等待。
+每个资源使用 `AbortSignal.timeout(30000)` 限制为 30 秒。CDN 慢速响应或超大文件（如未压缩的 3D 模型）可能超时跳过，并在 stderr 打印 `skip (fetch error): <url>`。超时跳过的资源不会写入 `asset-map.json`，HTML 中对应 URL 也不会被重写（仍为原始 CDN 地址）——这类残留会被 Step 4 的资源完整性体检（关卡 0）抓出。
 
-### ② 单个资源 30 秒超时
-
-每个资源使用 `AbortSignal.timeout(30000)` 限制为 30 秒。CDN 慢速响应或超大文件（如未压缩的 3D 模型）可能超时跳过，并在 stderr 打印 `skip (fetch error): <url>`。超时跳过的资源不会写入 `asset-map.json`，`index.html` 中对应 URL 也不会被重写（仍为原始 CDN 地址）。
-
-### ③ 仍可能漏抓的动态资源
+### ② 仍可能漏抓的动态资源
 
 滚动触发 + DOM/CSS 解析补抓已覆盖**懒加载图**和**视口外背景图**。仍会漏的只剩纯运行时生成、静态文本里无迹可寻的资源：
 
@@ -166,11 +178,9 @@ assets/css/main-<sha1(query 字符串)前8位>.css
 - **字体子集化**：Google Fonts 等按 `unicode-range` 动态生成子集，实际文件 URL 与 `@import` 的元 URL 不同。
 - **交互触发的 `import()` chunk**：仅在点击/路由切换后才请求的代码分割块（滚动触发不了的那部分）。
 
-**兜底**：以这些为限，用 Step 4 的**资源完整性体检**（`05-visual-verification.md`）主动发现——grep 产物中残留的外链/根绝对路径，命中即逐条用 `--referer` 或手动补抓。不要再把这套兜底当成"每次都要人工补一遍"的常规步骤。
+**兜底**：以这些为限，用 Step 4 的**资源完整性体检**（`05-visual-verification.md` 关卡 0）主动发现——grep 产物中残留的外链/协议相对/根绝对引用，命中即逐条用 `--referer` 或手动补抓。不要再把这套兜底当成"每次都要人工补一遍"的常规步骤。
 
-### ④ 跨 host 同路径资源命名冲突
-
-`localPathFor()` 函数只使用 URL 的 `pathname`（去掉 `host` 部分）生成本地路径。如果两个不同域名的 CDN 使用了相同的文件路径（如 `cdn-a.com/js/vendor.js` 和 `cdn-b.com/js/vendor.js`），本地路径会相同，后下载的会覆盖先下载的文件，且 `asset-map.json` 中两条 URL 会映射到同一本地路径，造成引用错误。目前没有自动去冲突机制，需人工处理。
+> 历史局限说明：早期版本的「顺序下载慢」已由 `--concurrency`（默认 8 并发）解决；「跨 host 同路径互相覆盖」已由自动 host 目录隔离解决（见第三节 3.5）。
 
 ---
 
@@ -184,12 +194,21 @@ assets/css/main-<sha1(query 字符串)前8位>.css
 
 ---
 
-## 六、整站模式：跨页共享资产去重
+## 六、整站模式：跨页共享资产去重（已内置）
 
-在复刻整站（多个页面）时，多个页面往往共用同一套 CSS/字体/核心 JS。推荐以下去重策略：
+在复刻整站（多个页面）时，多个页面往往共用同一套 CSS/字体/核心 JS。去重已内置为 `--map` 参数，无需手写合并逻辑：
 
-1. **维护一份全局 `asset-map.json`**：放在站点级目录（如 `.site-replicator/example.com/asset-map.json`），各页面的 `download-assets.mjs` 运行前先加载此文件，已存在的 URL 直接跳过下载，只追加新的 URL。
+1. **`--map` 指向站点级 `asset-map.json`**：每页调用时传同一个 map 文件——已在 map 且文件已落盘的 URL 跳过下载，新资源追加后写回。
+2. **`--out` 统一传站点级构建目录**（如 `pages-build/`），配合 `--html-out` 为每页指定不同的 HTML 文件名，assets/ 只存一份。
+3. **推荐直接用 `scripts/run-pages.mjs`**：它按上述方式编排每页的 `download-assets.mjs` 调用，并额外做页间互链重写与危险链接失活，详见 `02-site-discovery.md` 第五节。
 
-2. **`assets/` 目录共享**：各页面克隆的 `index.html` 中的引用路径统一指向站点级 `assets/` 目录（调整 `--out` 参数为站点级目录），避免同一字体文件在每个页面目录下各存一份。
-
-3. **相同 URL 不重复下载**：脚本内部使用 `seen` Set 去重（同一次运行内去重），跨页去重需在调用层面共享同一份 `network.json` 的合并结果，或在外部脚本中先合并多页 `network.json`，再统一调用一次 `download-assets.mjs`。
+```bash
+# 单页手工调用（整站中某一页）的等效形式
+node scripts/download-assets.mjs \
+  --network .site-replicator/example.com/about/original/network.json \
+  --html    .site-replicator/example.com/about/original/dom.html \
+  --out     .site-replicator/example.com/pages-build \
+  --map     .site-replicator/example.com/pages-build/asset-map.json \
+  --html-out .site-replicator/example.com/pages-build/about.html \
+  --referer https://example.com/about/
+```

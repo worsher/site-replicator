@@ -87,14 +87,17 @@ done
 node scripts/dom-diff.mjs \
   --orig  <原始站 URL（必须是可访问的 http/https）> \
   --clone <克隆站 URL（必须是可访问的 http/https）> \
-  --out   <报告输出.json>
+  --out   <报告输出.json> \
+  [--width 1440] \
+  [--exclude "<css 选择器，逗号分隔>"]
 ```
 
 注意：`--orig` 和 `--clone` 均为 **URL**，不是文件路径。克隆站需用 `npx serve` 或其他 HTTP 服务托管后再传入。
 
-### 三断点说明
-
-`dom-diff.mjs` 使用 Playwright 在固定视口下抓取 DOM，**脚本本身不接受断点参数**。如需多断点对比，需修改 Playwright context 的 `viewport` 或分三次调用（每次修改环境）。实践中通常以桌面端（1440）的 DOM 对比为主，配合 `visual-diff` 的三断点截图覆盖移动端。
+| 参数 | 说明 |
+|---|---|
+| `--width`（默认 1440） | 两侧快照的视口宽度。多断点对比时以不同 `--width`（1440/768/375）各跑一次；实践中以桌面端为主，配合 `visual-diff` 三断点截图覆盖移动端 |
+| `--exclude`（可选） | 对比前**从两侧同时删除**命中的节点（如 `--exclude "#cookie-banner,.chat-widget"`）。用于排除第三方注入节点造成的级联错位（见下文 structureScore 已知限制） |
 
 ### stdout 输出（终端摘要）
 
@@ -146,9 +149,16 @@ node scripts/dom-diff.mjs \
 
 ## 四、分项阈值说明
 
+> **先读：两条影响所有分项的系统性噪声**
+>
+> 1. **时点漂移**：像素对比用的是 Step 1 落盘的截图（时点固定），而 `dom-diff --orig` 打的是**实时原站**。轮播 banner 轮换、cookie 弹窗出现、A/B 变体都会造成「clone 忠实于快照、却与此刻原站不同」的幻影 mismatch。操作规则：**Step 4 尽量与 Step 1 同会话紧邻执行**；对集中在动态区域（banner/推荐位/弹窗）的 mismatch，先打开 `original/dom.html` 快照核对——clone 与快照一致即可豁免，不要去追原站的实时变化。
+> 2. **JS 定时器驱动的 UI 无法冻结**：`capture.mjs` 已默认冻结 CSS/WAAPI 动画（有限动画快进到终态、无限动画取消），旋转/渐入类噪声已消除；但轮播自动播、rAF 位移这类 JS 定时器驱动的运动冻结不了。热力图差异集中在轮播区时，按 `06-animation.md`「冻结与隐藏」做 DOM 级处理，或用 `shot-el.mjs` 对该区块单独核对，**不要用调低全页门控来吸收它**。
+
 ### 像素 score：建议门控 ≥ 0.98
 
 高保真静态站可设更高（如 0.99）。动效活跃或有大量图片懒加载的站可适当调低至 0.95。`--threshold 0.1` 的单像素容差默认值已足够容忍轻微的抗锯齿/次像素渲染差异，通常无需调整。
+
+**长页稀释效应**：score 按全页像素平均，页面越长门控越弱——20000px 高的页面上，一个整段 200px 的区块完全塌掉也只占 1% 像素，0.98 照样通过。全页高度超过 ~8000px 时，除全页 score 外，还应对导航/Hero/CTA/Footer 等关键区块用 `shot-el.mjs` + `visual-diff.mjs` 做元素级核对（关卡 2 的逐区块细查不再是可选项，而是必做项）。
 
 ### structureScore：建议门控 ≥ 0.90
 
@@ -156,7 +166,11 @@ node scripts/dom-diff.mjs \
 
 **已知限制 — 级联错位导致虚低**：算法按索引线性对齐两份节点列表，不做智能树对齐。如果 clone 在早期（如第 3 个节点处）多一个或少一个节点（常见原因：第三方 analytics/chat widget 注入了额外的 `<script>` 容器或 `<div>`），则此后所有节点的索引全部偏移，造成大规模假阳性结构 mismatch，`structureScore` 会系统性虚低。
 
-**应对策略**：对有第三方注入的站点，可将门控调低至 0.80，或在运行 `dom-diff` 前先在 clone 的 `index.html` 中删除已知的第三方注入节点（analytics、chat widget、cookie banner 等），再比对。
+**应对策略**（按优先级）：
+
+1. **首选 `--exclude`**：`node scripts/dom-diff.mjs ... --exclude "#cookie-banner,.chat-widget,[id^='crisp']"`，两侧同时剔除已知第三方注入节点后再比对，不改动 clone 产物本身。
+2. 无法用选择器精确命中时，在 clone 的 `index.html` 中手动删除注入节点后再比对。
+3. 以上都不可行时，将门控调低至 0.80 并在报告中注明原因。
 
 ### styleScore：建议门控 ≥ 0.85
 
@@ -419,17 +433,30 @@ node -e "
 
 **为什么排在像素对比之前**：像素/结构/样式分数会被懒加载状态差异、页面高度差异严重稀释——某张背景图或一批图标 404，整页分数可能仍在 0.9 以上，甚至因高度错位而失真到 0.4（看似大问题实则只是懒加载未触发）。分数无法可靠回答"资源是否全部本地化"。**grep 残留引用可以**，且是确定性的：有就是有，没有就是没有。
 
-在 clone 输出目录执行，两条命令都应输出 **0 行**：
+在 clone 输出目录执行，四条命令都应输出 **0 行**：
 
 ```bash
 CLONE=<clone 输出目录>
-# ① HTML 里仍指向站外(http)或根绝对(/)的资源引用
-grep -rhoE '(src|href|data-original)="(https?:|/)[^"]*\.(jpg|jpeg|png|gif|svg|webp|ico|woff2?|ttf|otf|eot|mp4|webm)"' "$CLONE" --include="*.html" | grep -vE '"(\./|\.\./|assets/)' | sort -u
-# ② CSS 里仍指向站外或根绝对的 url() 引用
-grep -rhoE 'url\([^)]*\)' "$CLONE" --include="*.css" | grep -E "url\\((['\"]?)(https?:|/)" | sort -u
+
+# ① 绝对/协议相对残留：任何仍指向 http(s):// 或 //host 的静态资源引用（HTML+CSS 全文，覆盖 src/srcset/data-*/url()）
+grep -rhoE '(https?:)?//[[:alnum:]._~:/?#@!$&*+,;=%-]+\.(png|jpe?g|gif|svg|webp|avif|ico|bmp|woff2?|ttf|otf|eot|mp4|webm|ogg|mp3|wav|css|js)(\?[[:alnum:]._~:/?#@!$&*+,;=%-]*)?' "$CLONE" --include='*.html' --include='*.css' | sort -u
+
+# ② 引号属性里的根绝对(/...)残留（本地静态托管时 404）
+grep -rhoE '(src|href|data-src|data-original|data-lazy-src)="/[^/"][^"]*\.(png|jpe?g|gif|svg|webp|avif|ico|bmp|woff2?|ttf|otf|eot|mp4|webm)[^"]*"' "$CLONE" --include='*.html' | sort -u
+
+# ③ srcset 里的根绝对残留（含列表中段的条目，① ② 覆盖不到）
+grep -rhoE '(data-(lazy-)?)?srcset="[^"]*"' "$CLONE" --include='*.html' | grep -E '("|, ?)/[^/]' | sort -u
+
+# ④ CSS url() 里的根绝对残留
+grep -rhoE "url\(['\"]?/[^/)'\"][^)]*\)" "$CLONE" --include='*.css' | sort -u
 ```
 
-命中任一行 = 有资源未本地化（防盗链 403、懒加载漏抓、根绝对路径未重写、畸形 url() 等）。逐条用 `download-assets.mjs --referer` 重跑或手动补抓，直至清零。**只有真正的站外坏链（原站自身 404/500）可豁免，需逐条 curl 确认后记录。**
+命中任一行 = 有资源未本地化（防盗链 403、懒加载漏抓、根绝对路径未重写、畸形 url() 等）。逐条用 `download-assets.mjs --referer` 重跑或手动补抓，直至清零。
+
+**可豁免的命中（逐条确认后记录）**：
+
+- 真正的站外坏链：原站自身 404/500，需逐条 `curl -sI` 确认。
+- 不参与渲染的元数据 URL：JSON-LD（`application/ld+json`）、`og:image` 等 meta 标签里的绝对 URL 会被 ① 扫到，但浏览器不会为渲染去请求它们，保留或改写均可。
 
 ### 关卡 1：自动指标全部达标
 
@@ -451,6 +478,7 @@ grep -rhoE 'url\([^)]*\)' "$CLONE" --include="*.css" | grep -E "url\\((['\"]?)(h
 2. 若 `origHeight ≠ cloneHeight`，手动打开截图对比底部区域。
 3. 导航栏、Hero 区域、核心 CTA 按钮、Footer 的视觉排布与原站一致。
 4. 字体、颜色、间距无肉眼可见偏差。
+5. **关键文案抽查**：dom-diff 只比标签结构与 16 项计算样式，**不校验文本内容**——文字错漏/乱码在结构分、样式分上完全不体现，像素分又可能被长页稀释。标题、CTA 文字、页脚信息须肉眼逐条核对。
 
 **逐区块细查辅助**：某区块可疑时，用 `scripts/shot-el.mjs --url <站> --sel <选择器> --out <png>` 对原站与 clone 的同一选择器各截一张（脚本内置慢滚，会触发 scroll-reveal、避免把入场动画截成空白），再用 `scripts/stitch.mjs --a <原图> --b <克隆> --out <拼接图>` 横向并排，比全页热力图更易看出局部偏差。
 

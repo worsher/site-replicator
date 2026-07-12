@@ -228,49 +228,66 @@ const urlSet = new Set(allUrls.map(normalise));
 
 ---
 
-## 五、批量调度
+## 五、批量调度（scripts/run-pages.mjs）
 
-### 执行顺序
+### 页面清单 → 配置文件
 
-对每个选中的页面 URL，依次执行 `01-page-pipeline.md` 中的完整单页管线（Step 1~5）：
+用户确认页面清单后，把清单写成 `pages.json`（放在 `.site-replicator/<host>/` 下即可），交给 `scripts/run-pages.mjs` 批量执行：
 
-1. `capture.mjs` 抓取原始站快照（dom.html、network.json、三断点截图）
-2. `download-assets.mjs` 下载静态资源、生成 L1 clone
-3. 反混淆（见 `04-deobfuscation.md`）
-4. 三重对比验证（dom-diff + visual-diff，见 `05-visual-verification.md`）
-5. 动效复刻（见 `06-animation.md`）
+```jsonc
+{
+  "origin": "https://www.example.com",
+  "root": ".site-replicator/example.com",   // 工作目录（相对 cwd 或绝对路径）
+  "breakpoints": [1440, 768, 375],          // 可选，默认三断点
+  "concurrency": 8,                          // 可选，资源并发下载数
+  "inertPaths": ["/cart/", "/checkout/", "/my-account/", "/wishlist/"],  // 可选，失活链接
+  "copyTo": "/path/to/project/pages",        // 可选，成品拷贝目标
+  "pages": [
+    { "slug": "home",     "path": "/",          "file": "index.html" },
+    { "slug": "about",    "path": "/about-us/", "file": "about-us.html" },
+    { "slug": "product1", "path": "/product/foo/", "file": "product-foo.html" }
+  ]
+}
+```
+
+```bash
+node scripts/run-pages.mjs --config .site-replicator/example.com/pages.json            # 全流程
+node scripts/run-pages.mjs --config <pages.json> --mode capture                        # 只抓取
+node scripts/run-pages.mjs --config <pages.json> --mode build                          # 只构建（快照已存在时）
+```
+
+脚本做四件事（进度写入 `<root>/run-pages.log`）：
+
+1. **capture**：逐页调用 `capture.mjs` 抓快照；已有 `dom.html` + 首断点截图的页面自动跳过（**断点续跑**）；页与页之间内置 500ms~1s 随机延迟（礼貌限速）。
+2. **共享资产下载**：逐页调用 `download-assets.mjs`，统一 `--out <root>/pages-build` + `--map <root>/pages-build/asset-map.json`，全站 assets/ 只存一份、相同资源只下载一次。
+3. **页间互链重写 + 危险链接失活**：`pages[]` 里的 path 互链自动改写为本地文件名（`href="/about-us/"` → `href="about-us.html"`）；`inertPaths` 命中的链接（购物车/结算/账户等无后端支撑、点击会跳回原站的路径）改为 `href="#"`。
+4. **copyTo**（可选）：把成品页 + assets/ 拷贝到目标项目目录。
+
+> 反混淆（`04-deobfuscation.md`）、三重对比验收（`05-visual-verification.md`）、动效复刻（`06-animation.md`）仍按 `01-page-pipeline.md` 逐页执行——run-pages 只吃掉 Step 1~2 的批量体力活。
 
 工作目录结构：
 
 ```
 .site-replicator/<host>/
-├── asset-map.json          ← 全局共享（跨页去重，详见下方）
-├── assets/                 ← 全局共享静态资源
+├── pages.json              ← 页面清单配置（本节格式）
+├── run-pages.log           ← 批量执行日志
 ├── home/                   ← 首页（slug: home）
-│   ├── original/
-│   ├── clone/
-│   └── dom-report.json
+│   └── original/           ← capture.mjs 产物（dom.html/network.json/screenshots/）
 ├── about/
-│   ├── original/
-│   ├── clone/
-│   └── dom-report.json
-├── product-123/            ← /product/:id 代表页
-│   ├── original/
-│   └── clone/
-└── site-report.html        ← 整站汇总报告
+│   └── original/
+├── pages-build/            ← 整站成品（可直接静态托管）
+│   ├── index.html
+│   ├── about-us.html
+│   ├── asset-map.json      ← 站点级共享 map（跨页去重）
+│   └── assets/             ← 站点级共享静态资源（全站一份）
+└── site-report.html        ← 整站汇总报告（见下节）
 ```
 
-### 跨页共享 asset-map（资源去重）
+### 单页目录与整站目录的关系（含验收产物落点）
 
-整站各页面往往共用同一套 CSS/字体/核心 JS。为避免重复下载，维护一份**站点级全局 `asset-map.json`**（路径：`.site-replicator/<host>/asset-map.json`）。
+单页模式的 `<host>/<page-slug>/clone/` 结构（见 `01-page-pipeline.md`）在整站模式下由 `pages-build/` 统一取代：每页一个 HTML 文件 + 共享 assets/，避免同一字体/CSS 在每页目录下各存一份。
 
-操作流程：
-
-1. 第一个页面正常调用 `download-assets.mjs`，产出的 `asset-map.json` 升级为全局文件，`assets/` 目录也提升至站点级。
-2. 后续每个页面在调用 `download-assets.mjs` 之前，先加载全局 `asset-map.json` 与本页 `network.json` 做对比——已在全局 map 中的 URL 跳过下载，只追加新资源。
-3. 每个页面的 `clone/index.html` 中的引用路径统一指向站点级 `assets/` 目录（调整相对路径或统一用根路径 `/assets/`）。
-
-详细去重策略见 `03-asset-extraction.md` 第六节。
+**整站模式下 Step 4 验收的约定**：对 `pages-build/` 起一个静态服务器，clone URL 取 `http://localhost:<port>/<file>`（如 `/about-us.html`）；每页的验证产物仍落回该页自己的目录 `<host>/<slug>/` 下——`clone-cap/`（clone 截图）、`diff-<bp>.png`、`dom-report.json`、`report.html`，与单页模式布局一致，site-report.html 的相对链接因此对两种模式通用。
 
 ---
 

@@ -1,6 +1,6 @@
 ---
 name: site-replicator
-description: 网页 1:1 复刻专家，对线上真实网页做高保真复刻。支持「单页复刻」与「整站发现+筛选+批量复刻」两种模式；复刻管线含 HTML 结构抓取、静态资源罗列下载与本地化、混淆代码分级复原、浏览器结构+样式+像素三重对比、动效提取与复刻。输出支持三层：L1 独立静态站 / L2 融入目标项目 / L3 重建到固定技术栈（默认 Next.js+Tailwind+TS，可配置）。
+description: 用户要求对线上网页/网站做 1:1 复刻、克隆、仿站、「照着这个站做一个一样的」、把某站扒下来本地化时使用。支持「单页复刻」与「整站发现+筛选+批量复刻」两种模式；复刻管线含 HTML 结构抓取、静态资源下载与本地化、混淆代码分级复原、浏览器结构+样式+像素三重对比、动效提取与复刻。输出支持三层：L1 独立静态站 / L2 融入目标项目 / L3 重建到固定技术栈（默认 Next.js+Tailwind+TS，可配置）。
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash, mcp__plugin_playwright_playwright__*, mcp__ChromeDevTools__*
 ---
 
@@ -61,7 +61,11 @@ cd ~/.claude/skills/site-replicator/scripts && pnpm install && pnpm exec playwri
 
 用户给站点根 URL 或要求整站复刻
   → 整站模式 → 先 references/02-site-discovery.md（发现+去重+用户确认）
-              → 再对每页走 references/01-page-pipeline.md
+              → 确认后的页面清单写成 pages.json，由 scripts/run-pages.mjs 批量执行
+              → 验收仍按 references/01-page-pipeline.md 逐页走 Step 3~5
+
+用户直接给一批具体 URL（不需要整站发现）
+  → 跳过发现环节，直接写 pages.json 走 scripts/run-pages.mjs（配置格式见 02 第五节）
 
 指定 outputTarget
   → 走对应 L1 / L2 / L3 → 详见 references/output-targets.md
@@ -87,9 +91,10 @@ cd ~/.claude/skills/site-replicator/scripts && pnpm install && pnpm exec playwri
 
 | 脚本 | 用途 | CLI | 详见 |
 |---|---|---|---|
-| `capture.mjs` | 多断点截图 + DOM/网络快照 | `node scripts/capture.mjs <url> --out <dir> [--breakpoints 1440,768,375] [--timeout 60000]` | `references/01-page-pipeline.md` |
-| `download-assets.mjs` | 批量下载静态资源并重写引用（自动滚动补抓 + Referer 破防盗链 + CSS 相对路径） | `node scripts/download-assets.mjs --network <network.json> --html <dom.html> --out <dir> [--referer <page-url>]` | `references/03-asset-extraction.md` |
-| `dom-diff.mjs` | DOM 结构 + 计算样式对比，输出 report.json | `node scripts/dom-diff.mjs --orig <url> --clone <url> --out <report.json>` | `references/05-visual-verification.md` |
+| `capture.mjs` | 多断点截图 + DOM/网络快照（自动滚动触发懒加载；默认冻结 CSS 动画保证截图可复现） | `node scripts/capture.mjs <url> --out <dir> [--breakpoints 1440,768,375] [--timeout 60000] [--keep-motion]` | `references/01-page-pipeline.md` |
+| `download-assets.mjs` | 并发下载静态资源并重写引用（un-lazy 还原 + Referer 破防盗链 + 协议相对/srcset/CSS url() 重写 + 跨 host 防覆盖） | `node scripts/download-assets.mjs --network <network.json> --html <dom.html> --out <dir> [--referer <page-url>] [--map <asset-map.json>] [--html-out <file>] [--concurrency 8] [--keep-lazy]` | `references/03-asset-extraction.md` |
+| `run-pages.mjs` | 多页批量 L1 管线：capture→共享资产→页间互链重写→危险链接失活（整站模式的执行器） | `node scripts/run-pages.mjs --config <pages.json> [--mode capture\|build\|all]` | `references/02-site-discovery.md` |
+| `dom-diff.mjs` | DOM 结构 + 计算样式对比，输出 report.json | `node scripts/dom-diff.mjs --orig <url> --clone <url> --out <report.json> [--width 1440] [--exclude <css-selector>]` | `references/05-visual-verification.md` |
 | `visual-diff.mjs` | 像素级差异热力图，输出 diff.png + score | `node scripts/visual-diff.mjs --orig <a.png> --clone <b.png> --out <diff.png> [--threshold 0.1]` | `references/05-visual-verification.md` |
 
 ### 辅助脚本（页面分析 / 区块验证，按需调用）
@@ -125,6 +130,8 @@ cd ~/.claude/skills/site-replicator/scripts && pnpm install && pnpm exec playwri
 | dom-diff `styleScore` | ≥ 0.85 |
 
 三个关卡（资源体检 + 自动指标 + 人工确认）均通过，方可归档。资源体检为何必须独立：像素/结构/样式分数会被懒加载状态、页面高度差异稀释，单看分数发现不了资源缺失，必须 grep 残留引用确定性兜住（详见 `05` 关卡 0）。
+
+**Step 5 动效落地之后必须复检**：重跑关卡 0（动效新增的 gsap/lottie 等资产必须本地化）+ 静止态像素对比，report.html 以复检结果归档——Step 4 时的报告不代表最终产物状态（详见 `01` 流程图与 `06` 第八节）。
 
 ---
 

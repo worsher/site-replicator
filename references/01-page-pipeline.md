@@ -71,7 +71,16 @@
 └──────┬──────┘
        │
        ▼
-   复刻完成（report.html 归档）
+┌─────────────┐
+│  动效后复检 │  ─────────────────────────────────────────────────────
+│             │  Step 5 改动了 clone（恢复 reveal 初始态、重初始化轮播、
+│             │  新增 gsap/lottie 等资产），Step 4 的报告已过期：
+│             │  ① 重跑关卡 0 —— 动效新增的库/JSON 资产必须同样本地化
+│             │  ② 重跑静止态像素对比（capture 默认冻结动画，动画终态即静止态）
+└──────┬──────┘
+       │  通过（未过 → 回 Step 5 修）
+       ▼
+   复刻完成（report.html 以复检结果归档）
 ```
 
 ---
@@ -129,13 +138,16 @@
 
 2. **定位差异节点**：从 `dom-report.json` 的 `mismatches` 数组中取 `path` 字段，即可精确定位到 clone 中偏差的节点。`path` 格式为 `body/div[0]/section[2]/…`，可直接用作 CSS/JS 选择器参考。
 
-3. **分类处理**：
-   - `type: "structure"`：结构差异，检查 clone 中该路径的 DOM 层级是否多/少节点（常见于第三方注入的 analytics/chat widget）。
+3. **先做症状分诊，再按类型处理**：
+   - **整块内容消失 / 轮播错位・重复・宽度诡异** → 先按 `06-animation.md`「冻结与隐藏」预检排查组件运行态（scroll-reveal 定格在隐藏态、轮播冻结 DOM）。这两类最容易被误诊成资源缺失而去反复补抓，实则是快照定格的组件状态没还原。
+   - `type: "structure"`：结构差异，检查 clone 中该路径的 DOM 层级是否多/少节点（常见于第三方注入的 analytics/chat widget，可用 `dom-diff --exclude` 排除后重比）。
    - `type: "style"`：样式差异，查看 `prop`/`orig`/`clone` 三字段，对照修改 clone 中对应节点的 CSS。
 
 4. **重跑对比**：修改 clone 后，重新执行 Step 4（capture + dom-diff + visual-diff），直到全部阈值通过。
 
-5. **人工确认**：自动阈值全部通过后，还需要人工打开 report.html，目视检查热力图与关键模块（导航、Hero、CTA、Footer）的视觉一致性，确认后方可归档。
+5. **人工确认**：自动阈值全部通过后，还需要人工打开 report.html，目视检查热力图与关键模块（导航、Hero、CTA、Footer）的视觉一致性。
+
+6. **动效后复检**：Step 5 落地动效后（引入新库、恢复 reveal/轮播运行态），必须重跑关卡 0 + 静止态像素对比，通过后才归档 report.html——Step 4 时生成的报告不代表最终产物状态。
 
 ---
 
@@ -161,7 +173,8 @@
 `scripts/` 下的脚本负责所有**批量、确定性**的工作：
 
 - `capture.mjs`：批量多断点截图 + 网络日志收集（无需人工干预）
-- `download-assets.mjs`：批量下载 + 引用重写（算法确定性强）
+- `download-assets.mjs`：并发下载 + 引用重写（算法确定性强）
+- `run-pages.mjs`：多页批量编排（capture→共享资产→页间互链重写，整站模式用，见 `02-site-discovery.md` 第五节）
 - `dom-diff.mjs`：结构/样式评分（数值可量化、可记录）
 - `visual-diff.mjs`：像素级差异热力图（客观、可归档）
 
@@ -206,7 +219,8 @@ for BP in 1440 768 375; do
     --threshold 0.1
 done
 
-# 4c. DOM 结构 + 样式对比
+# 4c. DOM 结构 + 样式对比（默认 1440 视口；如需移动端再加 --width 768 / 375 各跑一次；
+#     有第三方注入节点时用 --exclude "#cookie-banner,.chat-widget" 排除）
 node scripts/dom-diff.mjs \
   --orig  https://example.com \
   --clone $CLONE_URL \

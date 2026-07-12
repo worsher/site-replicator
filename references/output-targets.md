@@ -32,6 +32,8 @@ L1 的成品即 `download-assets.mjs` 的直接产出（见 `03-asset-extraction
     └── media/          ← 视频、音频等
 ```
 
+> **整站模式下的 L1 形态**：多页复刻时不再每页一个 `clone/` 目录，而是统一产出 `.site-replicator/<host>/pages-build/`（每页一个 HTML 文件 + 全站共享一份 `assets/`，页间互链已重写为本地文件名），由 `scripts/run-pages.mjs` 生成，详见 `02-site-discovery.md` 第五节。
+
 ### 2.2 使用方式
 
 直接在浏览器中打开 `clone/index.html`，或用任意静态文件服务器托管：
@@ -110,8 +112,8 @@ L3 不是一次性全量重写，而是以区块为单位渐进进行，每个�
     │  CSS → Tailwind 类     │
     │  动效迁移（见 06）     │
     └──────────┬────────────┘
-               │ visual-diff + dom-diff 对比 L1 基准
-               │ 通过（score ≥ 阈值）？
+               │ 区块门禁：shot-el 对 L1 与 L3 同一区块
+               │ 选择器各截一张 → visual-diff 元素图 ≥ 0.98
                ├── 否：回修区块 1
                ▼ 是
     ┌───────────────────────┐
@@ -124,10 +126,19 @@ L3 不是一次性全量重写，而是以区块为单位渐进进行，每个�
                │
                ▼ 所有区块通过
     ┌───────────────────────┐
-    │  最终对原站做一次总对比 │
-    │  visual-diff + dom-diff│
+    │  整页终检（此时才跑全页三重对比）│
+    │  ① 对 L1：visual-diff + dom-diff │
+    │  ② 对原站：再做一次总对比        │
     └───────────────────────┘
 ```
+
+**区块门禁为什么必须用元素级对比（shot-el），而不是整页三重对比：**
+
+- 建到第 k 个区块时页面是**半成品**：dom-diff 的线性索引对齐会从缺失区块开始全线错位，structureScore 必然崩，跑了也无法解读。
+- visual-diff 的 crop-to-min 恰好裁掉未建部分，看似能用，实则依赖「区块严格自上而下追加」这一未声明前提，且每区块跑一次全页抓取+全图 diff，成本是元素级对比的 10 倍以上。
+- 正确姿势：`shot-el.mjs --url <L1 服务> --sel <区块选择器>` 与 `--url <L3 服务> --sel <对应选择器>` 各截一张，`visual-diff.mjs` 比对元素图（≥ 0.98），必要时 `stitch.mjs` 并排目视。**整页 visual-diff + dom-diff 只在全部区块完成后执行**（先对 L1，再对原站）。
+
+**L3 参与对比时用 production 构建**：`next build && next start` 后再截图对比——dev 模式的按需编译、HMR、hydration 时序都会引入与重写质量无关的噪声。
 
 **为何对比 L1 而非直接对比原站：**
 
@@ -148,7 +159,7 @@ L3 不是一次性全量重写，而是以区块为单位渐进进行，每个�
 
 #### CSS / 内联样式 → Tailwind
 
-优先将所有样式转换为 Tailwind 原子类。对以下情况使用 CSS Module 或 global CSS 补充：
+优先将所有样式转换为 Tailwind 原子类。**数值换算优先用任意值语法精确还原**（原站 `padding:70px` → `p-[70px]`，而非就近取 scale 的 `p-16`/`p-20`）——就近归一每处差几像素，styleScore 与像素分会被持续吃掉且难以归因；确认视觉一致后如需美化再统一归一到 scale。对以下情况使用 CSS Module 或 global CSS 补充：
 
 - Tailwind 无法表达的复杂 `@keyframes` 动效（写入 `globals.css` 或对应的 CSS Module）。
 - 计算值（如 `calc(100vh - 64px)`）——可用 Tailwind 的任意值语法 `h-[calc(100vh-64px)]`，若过于复杂则退回 CSS Module。

@@ -69,10 +69,10 @@
 
 ### 2.1 扫描 @keyframes
 
-在 `deobf/css/`（Tier 0 格式化后的 CSS，见 `04-deobfuscation.md`）中搜索所有 `@keyframes` 声明：
+在 `deobf/assets/css/`（Tier 0 格式化后的 CSS，产物路径见 `04-deobfuscation.md` 第七节）中搜索所有 `@keyframes` 声明：
 
 ```bash
-grep -n "@keyframes" deobf/css/main.css
+grep -rn "@keyframes" deobf/assets/css/
 ```
 
 找到后，将完整的 `@keyframes` 块复制到 clone 的 CSS 中，并确认对应元素上的 `animation` 属性（名称、时长、缓动、播放次数、延迟、填充模式）是否完整保留。
@@ -96,7 +96,7 @@ grep -n "@keyframes" deobf/css/main.css
 对有 hover、focus、active 等状态切换效果的元素，检查 `transition` 属性：
 
 ```bash
-grep -n "transition" deobf/css/main.css | grep -v "transition:" | grep -v "@"
+grep -rnE "transition[-a-z]*\s*:" deobf/assets/css/
 ```
 
 常见形式：
@@ -410,3 +410,15 @@ window.addEventListener('scroll', () => {
 | 深度混淆的自定义 JS 计算逻辑 | Tier 2（全量还原，见 `04-deobfuscation.md` 第五节） |
 
 升级到 Tier 2 后，重新理解动效逻辑，据此在 clone 中用标准 API（`requestAnimationFrame`、Web Animations API、GSAP）重写实现，**不直接复用原站混淆后的 JS**（避免潜在的授权问题和维护困难）。
+
+---
+
+## 八、动效落地后的复检（归档前必做）
+
+Step 5 会实实在在地改动 clone：恢复 scroll-reveal 的初始隐藏态、重初始化轮播、引入 GSAP/Lottie/AOS 等新资产。**Step 4 时生成的验收报告不再代表最终产物**，归档前必须复检：
+
+1. **重跑关卡 0（资源完整性体检）**：动效阶段新增的库文件（`gsap.min.js`、`lottie.min.js`、Lottie JSON、AOS CSS 等）必须与其他资源一样本地化——若以 CDN 引用留在 clone 里，关卡 0 会命中，按 `05-visual-verification.md` 处理。
+2. **重跑静止态像素对比**：用 `capture.mjs`（默认冻结动画：有限动画快进到终态、无限动画取消）重新截图 clone，与 original 截图跑 `visual-diff.mjs`，各断点仍需 ≥ 0.98。冻结语义下「动画终态」即静止态，恢复了入场动画的元素不会被误截成 `opacity:0` 空白。
+3. 通过后，report.html 以**复检结果**归档；未过则回到本文档对应小节修复。
+
+> **截图与动效验证的分工**：`capture.mjs` 默认冻结 CSS/WAAPI 动画，服务于像素对比的可复现性；验证动效本身（帧序列、时序）时用浏览器 MCP 截帧（见第四节），或给 capture 加 `--keep-motion` 保留运行态。JS 定时器驱动的 UI（轮播自动播、rAF 位移）无法冻结，属像素对比的固有噪声——差异集中在这类区块时，按本文档「冻结与隐藏」处理或用 `shot-el.mjs` 对区块单独核对。

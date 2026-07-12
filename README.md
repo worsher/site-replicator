@@ -64,10 +64,13 @@ cd ~/.claude/skills/site-replicator/scripts && pnpm install && pnpm exec playwri
 
 | 脚本 | 用途 | 独立运行示例 |
 |---|---|---|
-| `capture.mjs` | 多断点截图 + DOM/网络快照 | `node scripts/capture.mjs <url> --out <dir> [--breakpoints 1440,768,375] [--timeout 60000]` |
-| `download-assets.mjs` | 批量下载静态资源并重写引用 | `node scripts/download-assets.mjs --network <network.json> --html <dom.html> --out <dir>` |
-| `dom-diff.mjs` | DOM 结构 + 计算样式对比，输出 report.json | `node scripts/dom-diff.mjs --orig <url> --clone <url> --out <report.json>` |
+| `capture.mjs` | 多断点截图 + DOM/网络快照（自动滚动触发懒加载；默认冻结 CSS 动画） | `node scripts/capture.mjs <url> --out <dir> [--breakpoints 1440,768,375] [--timeout 60000] [--keep-motion]` |
+| `download-assets.mjs` | 并发下载静态资源并重写引用（un-lazy 还原 + 防盗链 + 跨 host 防覆盖） | `node scripts/download-assets.mjs --network <network.json> --html <dom.html> --out <dir> [--map <asset-map.json>] [--html-out <file>] [--concurrency 8]` |
+| `run-pages.mjs` | 多页批量 L1 管线（整站模式执行器：共享资产 + 页间互链重写 + 危险链接失活） | `node scripts/run-pages.mjs --config <pages.json> [--mode capture\|build\|all]` |
+| `dom-diff.mjs` | DOM 结构 + 计算样式对比，输出 report.json | `node scripts/dom-diff.mjs --orig <url> --clone <url> --out <report.json> [--width 1440] [--exclude <sel>]` |
 | `visual-diff.mjs` | 像素级差异热力图，输出 diff.png + score | `node scripts/visual-diff.mjs --orig <a.png> --clone <b.png> --out <diff.png> [--threshold 0.1]` |
+
+另有六个区块级分析/验证小工具（`inspect-blocks` / `dump-text` / `extract-imgs` / `extract-links` / `shot-el` / `stitch`），用法见 SKILL.md「辅助脚本」速查表。
 
 ---
 
@@ -101,7 +104,7 @@ cd ~/.claude/skills/site-replicator/scripts && pnpm test
 ├── README.md                       ← 本文件
 ├── references/
 │   ├── 01-page-pipeline.md         ← 单页管线详细流程
-│   ├── 02-site-discovery.md        ← 整站页面发现与筛选
+│   ├── 02-site-discovery.md        ← 整站页面发现与筛选、批量调度（run-pages）
 │   ├── 03-asset-extraction.md      ← 静态资源下载与本地化
 │   ├── 04-deobfuscation.md         ← 分级反混淆规则
 │   ├── 05-visual-verification.md   ← 三重对比验收与回修闭环
@@ -109,16 +112,25 @@ cd ~/.claude/skills/site-replicator/scripts && pnpm test
 │   └── output-targets.md           ← L1/L2/L3 三层输出详解与配置格式
 └── scripts/
     ├── capture.mjs                 ← 多断点截图 + DOM/网络快照
-    ├── download-assets.mjs         ← 批量资源下载与引用重写
-    ├── dom-diff.mjs                ← DOM 结构 + 样式对比
+    ├── download-assets.mjs         ← 并发资源下载与引用重写（共享 map / un-lazy）
+    ├── run-pages.mjs               ← 多页批量 L1 管线（整站模式执行器）
+    ├── dom-diff.mjs                ← DOM 结构 + 样式对比（--width / --exclude）
     ├── visual-diff.mjs             ← 像素级差异热力图
+    ├── inspect-blocks.mjs          ← 区块结构盘点（辅助）
+    ├── dump-text.mjs               ← 区块文案提取（辅助）
+    ├── extract-imgs.mjs            ← 区块图片清单（辅助）
+    ├── extract-links.mjs           ← 区块链接清单（辅助）
+    ├── shot-el.mjs                 ← 单元素截图（辅助）
+    ├── stitch.mjs                  ← 双图横向拼接（辅助）
     ├── package.json
     └── test/
         ├── capture.test.mjs
         ├── dom-diff.test.mjs
         ├── download-assets.test.mjs
+        ├── run-pages.test.mjs
         ├── e2e.test.mjs
-        └── visual-diff.test.mjs
+        ├── visual-diff.test.mjs
+        └── helpers/server.mjs
 ```
 
 ---
