@@ -46,3 +46,29 @@ test('capture writes dom, tree, network, screenshots', async () => {
 test('exits non-zero when required args are missing', async () => {
   await assert.rejects(exec('node', [script], { timeout: 30000 }));
 });
+
+test('screenshots are deterministic: CSS animations frozen by default', async () => {
+  // /motion.html 有 200x200 的 infinite spin：不冻结动画时两次抓取的旋转角必然不同
+  const d1 = await mkdtemp(path.join(os.tmpdir(), 'cap-fz1-'));
+  const d2 = await mkdtemp(path.join(os.tmpdir(), 'cap-fz2-'));
+  const vdiff = path.join(here, '..', 'visual-diff.mjs');
+  await exec('node', [script, srv.url + '/motion.html', '--out', d1, '--breakpoints', '1440'], { timeout: 60000 });
+  await exec('node', [script, srv.url + '/motion.html', '--out', d2, '--breakpoints', '1440'], { timeout: 60000 });
+  const { stdout } = await exec('node', [vdiff, '--orig', path.join(d1, 'screenshots', '1440.png'), '--clone', path.join(d2, 'screenshots', '1440.png'), '--out', path.join(d1, 'diff.png')], { timeout: 30000 });
+  const r = JSON.parse(stdout);
+  assert.equal(r.mismatched, 0, `two captures of the same page must be pixel-identical, got ${r.mismatched} mismatched px`);
+  await rm(d1, { recursive: true, force: true });
+  await rm(d2, { recursive: true, force: true });
+});
+
+test('promotes data-lazy-src images so they enter network + dom snapshot', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'cap-lz-'));
+  await exec('node', [script, srv.url + '/lazy.html', '--out', dir, '--breakpoints', '1440'], { timeout: 60000 });
+
+  const net = JSON.parse(await readFile(path.join(dir, 'network.json'), 'utf8'));
+  assert.ok(net.some((r) => r.url.endsWith('/logo2.png')), 'lazy real image requested during capture');
+
+  const dom = await readFile(path.join(dir, 'dom.html'), 'utf8');
+  assert.match(dom, /<img[^>]*id="lz"[^>]*src="\/logo2\.png"/, 'placeholder src replaced by real image in snapshot');
+  await rm(dir, { recursive: true, force: true });
+});

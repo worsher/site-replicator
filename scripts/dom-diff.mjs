@@ -7,12 +7,15 @@ const { values } = parseArgs({
     orig: { type: 'string' },
     clone: { type: 'string' },
     out: { type: 'string' },
+    width: { type: 'string', default: '1440' }, // 视口宽度（多断点对比时分别以 1440/768/375 各跑一次）
+    exclude: { type: 'string' }, // 对比前从两侧删除的节点（CSS 选择器，逗号分隔）：第三方注入的 analytics/chat/cookie-banner
   },
 });
 if (!values.orig || !values.clone || !values.out) {
-  console.error('usage: node dom-diff.mjs --orig <url> --clone <url> --out <report.json>');
+  console.error('usage: node dom-diff.mjs --orig <url> --clone <url> --out <report.json> [--width 1440] [--exclude <css-selector>]');
   process.exit(1);
 }
+const viewportWidth = parseInt(values.width, 10) || 1440;
 
 const KEY_PROPS = [
   'display', 'position', 'color', 'background-color', 'font-size', 'font-weight',
@@ -23,10 +26,14 @@ const KEY_PROPS = [
 async function snapshot(url) {
   const browser = await chromium.launch();
   try {
-    const page = await browser.newPage();
+    const page = await browser.newPage({ viewport: { width: viewportWidth, height: 900 } });
     await page.goto(url, { waitUntil: 'load', timeout: 60000 });
     await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {});
-    const nodes = await page.evaluate((props) => {
+    const nodes = await page.evaluate(({ props, exclude }) => {
+      // 两侧同时剔除已知第三方注入节点，避免索引线性对齐被级联错位（structureScore 虚低的主因）
+      if (exclude) {
+        try { document.querySelectorAll(exclude).forEach((n) => n.remove()); } catch {}
+      }
       const list = [];
       function walk(node, p) {
         const cs = getComputedStyle(node);
@@ -38,7 +45,7 @@ async function snapshot(url) {
       const root = document.body || document.documentElement;
       if (root) walk(root, root.tagName.toLowerCase());
       return list;
-    }, KEY_PROPS);
+    }, { props: KEY_PROPS, exclude: values.exclude || '' });
     return nodes;
   } finally {
     await browser.close();

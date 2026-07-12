@@ -9,6 +9,7 @@ const { positionals, values } = parseArgs({
     out: { type: 'string' },
     breakpoints: { type: 'string', default: '1440,768,375' },
     timeout: { type: 'string', default: '60000' },
+    'keep-motion': { type: 'boolean', default: false }, // 保留动画运行态（默认截图前冻结，保证像素对比可复现）
   },
 });
 const url = positionals[0];
@@ -31,7 +32,8 @@ await mkdir(path.join(out, 'screenshots'), { recursive: true });
 
 const browser = await chromium.launch();
 try {
-  const context = await browser.newContext();
+  // 以首个断点为抓取视口：dom.html/network.json 反映桌面端布局（默认 context 是 1280，与 1440 断点不一致）
+  const context = await browser.newContext({ viewport: { width: breakpoints[0], height: 900 } });
   const page = await context.newPage();
 
   const requests = [];
@@ -66,10 +68,17 @@ try {
         else { same = 0; last = h; }
         if (atBottom && same >= 2) break; // 到底且高度连续两轮稳定
       }
-      // 强制把仍是占位符的懒加载图替换为真实图（让其发起请求并进入截图）
-      document.querySelectorAll('img[data-original],img[data-src]').forEach((img) => {
-        const real = img.getAttribute('data-original') || img.getAttribute('data-src');
-        if (real && (!img.src || img.src.startsWith('data:'))) img.src = real;
+      // 强制把仍是占位符的懒加载图替换为真实图（让其发起请求并进入截图）；
+      // 覆盖常见懒加载库的属性变体：lazysizes/LiteSpeed(data-src/data-lazy-src)、老 lazyload(data-original)
+      document.querySelectorAll('img').forEach((img) => {
+        const real =
+          img.getAttribute('data-original') ||
+          img.getAttribute('data-src') ||
+          img.getAttribute('data-lazy-src') ||
+          img.getAttribute('data-lazysrc');
+        if (real && (!img.getAttribute('src') || img.src.startsWith('data:'))) img.setAttribute('src', real);
+        const realSet = img.getAttribute('data-srcset') || img.getAttribute('data-lazy-srcset');
+        if (realSet && !img.getAttribute('srcset')) img.setAttribute('srcset', realSet);
       });
       window.scrollTo(0, 0);
       await sleep(200);
@@ -102,6 +111,25 @@ try {
 
   for (const bp of breakpoints) {
     await page.setViewportSize({ width: bp, height: 900 });
+    // 换断点后等响应式布局/新宽度触发的图片请求稳定，再截图（否则窄断点常截到未加载完的图）
+    await page.waitForTimeout(350);
+    await page.waitForLoadState('networkidle', { timeout: 2000 }).catch(() => {});
+    // 冻结 CSS/WAAPI 动画（有限动画快进到终态，无限动画取消回基态），否则两次抓取的
+    // 旋转角/过渡进度必然不同，像素对比被稀释。JS 定时器驱动的 UI（轮播自动播、rAF 位移）
+    // 冻结不了，属残留噪声，见 05-visual-verification 噪声源与 06-animation 的 DOM 级处理。
+    if (!values['keep-motion']) {
+      await page
+        .evaluate(() => {
+          for (const a of document.getAnimations()) {
+            try {
+              const t = a.effect && a.effect.getTiming ? a.effect.getTiming() : {};
+              if (t.iterations === Infinity) a.cancel();
+              else a.finish();
+            } catch {}
+          }
+        })
+        .catch(() => {});
+    }
     await page.screenshot({ path: path.join(out, 'screenshots', `${bp}.png`), fullPage: true });
   }
 
