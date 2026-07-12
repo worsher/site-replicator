@@ -98,7 +98,8 @@ grep -oE '<canvas' clone/index.html | wc -l
 C=clone/assets/_next/static/chunks   # 按实际路径调整；Next 的路由目录含 () 元字符，统一用 find 递归，避免 globstar/引号问题
 for pat in 'whileHover' 'whileTap' 'whileInView|useInView' 'useScroll|scrollYProgress' \
            'setInterval' 'AnimatePresence' 'animate:\{' 'variants:' \
-           'enterFrom|leaveTo' 'IntersectionObserver' 'particle|canvas' 'onMouseEnter'; do
+           'enterFrom|leaveTo' 'IntersectionObserver' 'particle|canvas' 'onMouseEnter' \
+           'animationend|animationstart'; do
   echo "== $pat =="; find "$C" -name '*.js' -exec grep -lE "$pat" {} + 2>/dev/null
 done
 # 对每个命中文件，提取参数上下文：
@@ -122,6 +123,7 @@ grep -oE '.{150}whileHover.{250}' <chunk>   # 窗口按需放大
 | `onMouseEnter`+`useState` | tooltip / 悬浮卡 | 事件 + 节点增删 |
 | `particleDensity`/canvas 绘制 | 粒子/程序化图形 | 轻量 canvas 重写 |
 | `animate:{x1/y1...}`（SVG 属性） | 渐变光束/描边动画 | rAF 改 SVG 属性 |
+| `addEventListener("animationend"...)` | **CSS 单次动画 + JS 重启循环**（流星/扫光类：keyframes 无 `infinite`，靠 JS 在结束时随机化 CSS 变量并 `animation:'none'`+reflow 重启）。⚠️ 症状：clone 里动画跑一次后停住不消失——CSS 部分正常工作反而掩盖了 JS 缺失 | 原样复刻 end/start 监听器 |
 
 **核销表**：每项动效登记「位置 / 驱动方式 / 参数来源(chunk) / 处置：已复刻｜静态可接受｜放弃(理由)」，全部核销后 Step 5 才算完成。数据（文案、价格、人名等）通常与动效代码同 chunk 或在相邻 chunk 的数组字面量里，一并提取，**不要凭截图肉眼抄**。
 
