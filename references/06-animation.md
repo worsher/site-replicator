@@ -61,7 +61,74 @@
   ```
   若要保留动画，则确保库脚本随站加载并能在 clone 上重新绑定。
 
-> 一句话：**“消失的模块”先怀疑 scroll-reveal 隐藏、“错位的轮播”先怀疑冻结 DOM**，确认不是这两类，再进入下面的动效提取。
+### SSR + 运行时动画（framer-motion / Headless UI 等，⚠️ 无 data-属性可识别）
+
+- **症状**：与 scroll-reveal 相同（整块永久不可见），但元素上**没有** `data-aos`/`wow` 等库标识，只有内联 `style="opacity: 0"` 或定格在中间值的内联 `transform`（如 `width: 92.47%`、`rotateX(-65deg)`）。
+- **根因**：framer-motion 的 `whileInView` 默认 `once:false`——capture 滚动采集触发了显现，但**回到顶部序列化时，离开视口的元素又回退到初始隐藏态**，快照落盘的就是 `opacity: 0`。滚动进度驱动的元素（`useScroll`/`useTransform`）则定格在序列化那一刻的插值上。
+- **最险的陷阱**：**基线截图与 clone 共享同一定格缺陷**——原站截图也是在同一运行态下拍的，两边"一样地错"，像素/结构/样式三项全部通过，任何分数都发现不了。只有对照活的原站（或用户反馈）才会暴露。
+- **处理**：做下面的「运行态定格审计」，逐项归类后要么恢复终态、要么复刻驱动逻辑（见第 1.5 节动效清单）。
+
+### 运行态定格审计（必做，grep 即可，离线可用）
+
+对 clone 序列化 DOM 扫描以下模式，**每一条命中都必须归类处置**，不允许"分数过了就不管"：
+
+```bash
+# 1. 定格在隐藏态的元素（最高优先级：这些在 clone 里是隐形的，且像素对比发现不了）
+grep -oE 'style="[^"]*opacity: ?0[^"]*"' clone/index.html | sort | uniq -c
+# 2. 定格在中间值的内联 transform / 百分比宽度（滚动进度驱动的痕迹）
+grep -oE 'style="[^"]*(rotate[XYZ]?\(|translate[XY]?\([^"]*%|width: ?[0-9]+\.[0-9]+%)[^"]*"' clone/index.html | sort | uniq -c | head -20
+# 3. 空 canvas（粒子/图表等运行时绘制的内容，序列化后必为空白）
+#    注意：序列化 DOM 常为单行，grep -c 数的是行数会恒报 1，必须用 -o | wc -l 数个数
+grep -oE '<canvas' clone/index.html | wc -l
+```
+
+归类三选一并记录：① **reveal 初始态** → 恢复终态或复刻触发逻辑；② **进度驱动定格** → 归到动效清单里复刻；③ **本就如此的静态样式**（如装饰性随机倾斜）→ 在 bundle 里确认来源后放行。
+
+> 一句话：**“消失的模块”先怀疑 scroll-reveal 隐藏、“错位的轮播”先怀疑冻结 DOM**；React/Next 站没有库标识，直接跑「运行态定格审计」。确认不是这几类，再进入下面的动效提取。
+
+---
+
+## 一.5、动效清单：bundle 原语扫描（必做，复刻完成的核销依据）
+
+**为什么必做**：靠浏览器逐个探索原站动效必然有遗漏（hover 类、定时器类、canvas 类都不在滚动路径上）；且原站可能随时不可达。已下载的 JS bundle 是**动效的完整、有限、离线可查的清单来源**。
+
+对 `clone/assets/` 下所有 JS chunk 扫描以下原语，每个命中都是一个待核销的动效：
+
+```bash
+C=clone/assets/_next/static/chunks   # 按实际路径调整；Next 的路由目录含 () 元字符，统一用 find 递归，避免 globstar/引号问题
+for pat in 'whileHover' 'whileTap' 'whileInView|useInView' 'useScroll|scrollYProgress' \
+           'setInterval' 'AnimatePresence' 'animate:\{' 'variants:' \
+           'enterFrom|leaveTo' 'IntersectionObserver' 'particle|canvas' 'onMouseEnter'; do
+  echo "== $pat =="; find "$C" -name '*.js' -exec grep -lE "$pat" {} + 2>/dev/null
+done
+# 对每个命中文件，提取参数上下文：
+grep -oE '.{150}whileHover.{250}' <chunk>   # 窗口按需放大
+```
+
+**排除库文件本身**：framer-motion / tsparticles 等库 chunk（体积大、命中密集但无业务字面量如类名/文案）里的原语是库实现，不算站点动效；业务动效集中在含 Tailwind 类名字符串、站点文案的 chunk 里。
+
+**压缩别名兜底**：生产 bundle 会把 `AnimatePresence` 压成 `X.M` 之类的命名空间成员，字面量扫不到。补充特征：`children:` 里的条件挂载 `xxx===s&&(0,t.jsx)(...)` 配合 `initial:{opacity:0`、以及 `exit:{`（exit 只在 AnimatePresence 内有意义）。同理 `useInView` 常以 hook 别名出现——DOM 审计里发现了 reveal 定格但清单里找不到 `whileInView` 时，按 `initial:{opacity:0` / `exit:{` / IntersectionObserver 反查。
+
+**原语 → 动效类型对照**：
+
+| 原语 | 动效类型 | 典型实现 |
+|---|---|---|
+| `useScroll`/`useTransform` + `offset:[...]` | 滚动进度驱动（视差/转正/渐显渐隐） | 读出映射区间，rAF + 分段线性插值复刻 |
+| `whileHover`/`whileTap` + `variants` | 悬停/按压变体 | mouseenter/leave + CSS 过渡 |
+| `whileInView` / `useInView` | 进入视口触发（压缩后常只剩 hook 别名，见上方兜底特征） | IntersectionObserver |
+| `setInterval` | 自动轮播/定时切换 | 原样复刻间隔与切换逻辑 |
+| `enterFrom/enterTo/leaveFrom/leaveTo`（Headless UI Transition） | 类驱动过渡 | 直接搬 Tailwind 过渡类 + 定时器 |
+| `AnimatePresence` + `initial:!1` | 展开/折叠、挂载卸载动画 | 高度/透明度过渡 |
+| `onMouseEnter`+`useState` | tooltip / 悬浮卡 | 事件 + 节点增删 |
+| `particleDensity`/canvas 绘制 | 粒子/程序化图形 | 轻量 canvas 重写 |
+| `animate:{x1/y1...}`（SVG 属性） | 渐变光束/描边动画 | rAF 改 SVG 属性 |
+
+**核销表**：每项动效登记「位置 / 驱动方式 / 参数来源(chunk) / 处置：已复刻｜静态可接受｜放弃(理由)」，全部核销后 Step 5 才算完成。数据（文案、价格、人名等）通常与动效代码同 chunk 或在相邻 chunk 的数组字面量里，一并提取，**不要凭截图肉眼抄**。
+
+**注入实现的两个坑**（把动效脚本写回 clone 时）：
+
+1. `String.replace('</body>', 补丁)` 的替换串里若含 `$'`、`$\``（如价格拼接 `'$' +`），会被当作特殊替换模式展开导致脚本损坏——**始终用函数形式** `html.replace('</body>', () => 补丁)`。
+2. 用 JS 模板字符串包裹注入脚本时，`\$`、`\\` 等转义会被模板字符串先消费一层（`/\$/` 送达后变成 `/$/`，守卫恒真）——正则守卫改用 `indexOf` 等无反斜杠写法，或对反斜杠双重转义。
 
 ---
 
