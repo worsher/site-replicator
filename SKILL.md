@@ -109,6 +109,8 @@ cd ~/.claude/skills/site-replicator/scripts && pnpm install && pnpm exec playwri
 | `extract-links.mjs` | 提取区块内链接 text/href/img（整站发现、导航/产品列表盘点） | `node scripts/extract-links.mjs --url <url> --sel <选择器>` |
 | `shot-el.mjs` | 单元素截图（含慢滚触发 scroll-reveal，避免入场动画截成空白），区块级视觉核对 | `node scripts/shot-el.mjs --url <url> --sel <选择器> --out <png> [--width 1440]` |
 | `stitch.mjs` | 两张 PNG 横向拼接，原图 vs 克隆并排目视对比 | `node scripts/stitch.mjs --a <a.png> --b <b.png> --out <png> [--gap 24]` |
+| `det-shot.mjs` | **保 JS 克隆的确定态截图**（停表+轮播归零+wow 揭示+图片加载等待+CSS 冻结；原站侧加 `--block-3p` 屏蔽三方注入），两侧同脚本消除运行态时序差异 | `node scripts/det-shot.mjs <url> <outdir> [--block-3p]` |
+| `restore-carousels.mjs` | 轮播冻结 DOM 还原（owl/slick/swiper 运行态 markup → 干净 slide 列表，禁 JS DOM 手术），保 JS 克隆的前置步骤 | `node scripts/restore-carousels.mjs --dir <目录> \| --html <文件>` |
 
 ---
 

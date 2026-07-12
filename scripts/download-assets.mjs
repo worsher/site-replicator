@@ -58,8 +58,15 @@ if (values.map && existsSync(values.map)) {
   for (const [u, local] of Object.entries(JSON.parse(await readFile(values.map, 'utf8')))) {
     map[u] = local;
     try { claimed.set(local, new URL(u).host); } catch {}
-    if (existsSync(path.join(out, local))) seen.add(u); // 文件缺失则允许重新下载
+    if (existsSync(path.join(out, diskPathOf(local)))) seen.add(u); // 文件缺失则允许重新下载
   }
+}
+
+// 引用路径（保持百分号编码，空格等字符不破坏 srcset/HTML 语法）→ 磁盘路径（逐段解码）。
+// 静态服务器会把请求 pathname 解码后找文件：磁盘存原名、引用存编码名，两者才能对上
+// （反例：编码名直接落盘时，非 ASCII 文件名会 404）。
+function diskPathOf(rel) {
+  return rel.split('/').map((s) => { try { return decodeURIComponent(s); } catch { return s; } }).join('/');
 }
 
 // 由 URL 推导本地相对路径（去前导 /，防目录穿越；带 query 的资源用 query 哈希避免碰撞覆盖）
@@ -92,7 +99,7 @@ async function download(u) {
   if (seen.has(u)) return map[u] || null;
   seen.add(u);
   const rel = claimLocalPath(u);
-  const abs = path.join(out, rel);
+  const abs = path.join(out, diskPathOf(rel)); // 磁盘用解码名；map/引用保留编码名
   await mkdir(path.dirname(abs), { recursive: true });
   let resp;
   try {
@@ -264,9 +271,12 @@ function rewrite(text, fromDir, baseUrl) {
     // 对已替换好的相对路径用 baseUrl 解析回原 pathname → 幂等，不会二次破坏。
     result = result.replace(/url\(\s*['"]?\s*([^)'"\s]+)\s*['"]?\s*\)/g, (whole, ref) => {
       if (/^(data:|blob:)/i.test(ref)) return whole;
-      // 只兜“仍指向原始位置”的引用（完整 URL 或根绝对路径）；
-      // 已相对化的产物（如 logo.png、../img.png）跳过，避免规范化误改。
-      if (!/^(https?:|\/)/i.test(ref)) return whole;
+      // 兜“仍指向原始位置”的引用：完整 URL、根绝对路径，以及【带查询串的相对引用】。
+      // 相对引用平时无需重写（本地保留了目录结构，原名即可命中）；唯独带 query 的资源
+      // 落盘名被加了 query 哈希后缀（如 iconfont.woff2?t=123 → iconfont-ab12cd34.woff2），
+      // 原相对名必 404（典型症状：图标字体整批 404、@font-face 全 error）。
+      // 已相对化的产物不带 query 且解析不回 map 键 → 命中不了，天然幂等。
+      if (!/^(https?:|\/)/i.test(ref) && !ref.includes('?')) return whole;
       let resolved;
       try { resolved = new URL(ref, baseUrl); } catch { return whole; }
       const local = map[resolved.href] || byPath[resolved.pathname];
@@ -286,7 +296,7 @@ if (pageHtml !== null) {
 // 重写已下载的 css 文件中的 url() 引用（相对各自所在目录；按各自原始 URL 解析）
 for (const local of Object.values(map)) {
   if (!local.endsWith('.css')) continue;
-  const abs = path.join(out, local);
+  const abs = path.join(out, diskPathOf(local));
   let css;
   try { css = await readFile(abs, 'utf8'); } catch { continue; }
   await writeFile(abs, rewrite(css, path.dirname(abs), localToOrig[local] || pageBase), 'utf8');

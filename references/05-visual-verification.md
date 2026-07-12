@@ -458,6 +458,14 @@ grep -rhoE "url\(['\"]?/[^/)'\"][^)]*\)" "$CLONE" --include='*.css' | sort -u
 - 真正的站外坏链：原站自身 404/500，需逐条 `curl -sI` 确认。
 - 不参与渲染的元数据 URL：JSON-LD（`application/ld+json`）、`og:image` 等 meta 标签里的绝对 URL 会被 ① 扫到，但浏览器不会为渲染去请求它们，保留或改写均可。
 
+**⚠️ 反向陷阱——被本地化的三方 SDK**：统计/营销/聊天 SDK（GTM、gtag、聊天挂件、埋点库）被 download-assets 一并本地化后，`src="assets/gtm-xxx.js"` 能**通过**上面全部四条 grep，但运行时会重建聊天气泡/弹窗 UI 并向外发请求——比外链残留更隐蔽。补一条独立检查并**移除引用**（不是本地化）：
+
+```bash
+grep -rhoE '<script[^>]*src="assets/[^"]*"' "$CLONE" --include='*.html' | sort -u   # 逐条人工判别：站点功能 JS 保留，三方 SDK 移除
+```
+
+同理，序列化 DOM 里三方 SDK 注入过的节点（聊天气泡容器、广告 script、营销弹窗）要一并删除——SDK 的 UI 是运行时重建的，只删 DOM 不删 script 引用会"复活"。
+
 ### 关卡 1：自动指标全部达标
 
 | 指标 | 门控 |
@@ -469,6 +477,21 @@ grep -rhoE "url\(['\"]?/[^/)'\"][^)]*\)" "$CLONE" --include='*.css' | sort -u
 | dom-diff `styleScore` | ≥ 0.85 |
 
 任一指标未达标，需按回修闭环（见 `01-page-pipeline.md` 第四节）修复 clone 后重跑验证。
+
+### 关卡 1 变体：保 JS 克隆的确定态对比（scripts/det-shot.mjs）
+
+传统 CMS/jQuery 站的 JS 通常本地可跑（不像 Next hydration 必须剥离）。**保 JS 的克隆不能直接拿 capture 截图对比**：两侧页面都"活着"，轮播帧、计数器值、揭示状态随快门时刻漂移，分数虚低且不可复现。此时两侧改用 `det-shot.mjs` 截图后再 diff：
+
+```bash
+node scripts/det-shot.mjs <原站URL> <outdir> --block-3p   # 原站侧：屏蔽三方注入（统计/聊天/广告）
+node scripts/det-shot.mjs <克隆URL> <outdir>              # 克隆侧
+```
+
+脚本做六件事：包装并清空全部定时器（停表）→ owl/slick/swiper 归零（loop 模式用 slideToLoop）+ 点击各轮播第一个圆点兜底 → wow.js 等揭示态强制显示 → 冻结 CSS 动画 → **等待全部可见图片加载完成**（远程侧网络慢，不等会截出空白图形成假差异）→ 三断点全页截图。
+
+前置要求：克隆侧先跑过 `restore-carousels.mjs`（见 06 前置节）——否则克隆的轮播在序列化运行态 markup 上重新初始化，slide 顺序与原站干净初始化不一致，归零也对不齐。
+
+**已知限制——dom-diff 在保 JS 克隆上失效**：dom-diff 是线性索引对齐，保 JS 场景两侧运行时 DOM 被不同注入方改写（原站侧 GTM/聊天件注入节点，克隆侧轮播/表单件重新生成包装层），早期一处节点数差异即灾难性级联（structureScore 可低至 0.03，与视觉毫无关系——同一批页面确定态像素可为 1.0000）。此场景以「确定态像素对比 + 关卡 1.5 清单」为准，dom-diff 结果仅作参考不作门控；剥 JS 克隆（Next/SSR 快照型）不受此限，dom-diff 门控照常执行。
 
 ### 关卡 1.5：运行态定格审计 + 动效清单核销（分数发现不了的缺陷）
 

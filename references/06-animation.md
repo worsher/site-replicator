@@ -47,8 +47,9 @@
 
 - **症状**：宽度错乱（如 slide 宽 1280 而容器 1710）、出现重复幻灯片、不自动播放。
 - **根因**：DOM 里已有库生成的克隆节点和内联冻结尺寸（基于抓取时的视口），`transform: translate3d(...)`、`width: 1280px` 等被定格；重新加载时库在新视口初始化，与定格值打架。
-- **识别信号**：`*-initialized` / `*-cloned` 类名；`slick-track` / `swiper-wrapper` 上的内联 `transform`/`width`。
-- **处理**：把库生成的 DOM 剥离，**恢复成干净的原始 slide 列表**（去掉 clone 节点、内联尺寸、`*-initialized` 类），让库在页面加载时按当前视口重新初始化（原站的初始化脚本通常已随 JS 一起下载）。
+- **识别信号**：`*-initialized` / `*-cloned` 类名；`slick-track` / `swiper-wrapper` 上的内联 `transform`/`width`；slick fade 模式表现为一组 `position:relative; left:-N×宽度; opacity:0; z-index:998` 的绝对定位定格。
+- **处理**：`node scripts/restore-carousels.mjs --dir <构建目录>`——在禁 JS 的浏览器上下文里把 owl/slick/swiper 的运行态 markup 恢复成干净原始 slide 列表（去 clone 节点、剥 list/track 壳、清内联尺寸与 `*-initialized` 类），让库在 clone 加载时按当前视口重新初始化。**不还原的后果不止错位**：clone 侧在运行态 markup 上二次初始化，slide 顺序会与原站不一致，像素对比永远对不齐。
+- **同族陷阱不限于轮播**：任何"JS 生成壳 + 序列化定格"的组件都会二次初始化。已知成员：bootstrap-select 等表单美化件（症状：下拉框渲染两份、约 30px 高度差把下方内容整体推移——脚本已内置还原）；同理留意 select2 / chosen / nice-select / 日期选择器 / 树形控件。识别通法：序列化 DOM 里搜库的生成壳类名（`.bootstrap-select`、`.select2-container`、`.nice-select`），有壳且站点 JS 保留 → 必须还原成裸元素。
 
 ### 滚动揭示（AOS、ScrollReveal、WOW 等）
 
