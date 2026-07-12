@@ -84,6 +84,8 @@ grep -oE '<canvas' clone/index.html | wc -l
 
 归类三选一并记录：① **reveal 初始态** → 恢复终态或复刻触发逻辑；② **进度驱动定格** → 归到动效清单里复刻；③ **本就如此的静态样式**（如装饰性随机倾斜）→ 在 bundle 里确认来源后放行。
 
+> **本审计的覆盖边界**：定格在**文本内容**里的动效（计数器停在 "1,283"、打字机停在半句）没有任何样式特征，DOM 审计抓不到——这类只能由下面 1.5 节的 bundle 原语扫描（`requestAnimationFrame`/`setTimeout`）兜底，两份清单必须都跑。
+
 > 一句话：**“消失的模块”先怀疑 scroll-reveal 隐藏、“错位的轮播”先怀疑冻结 DOM**；React/Next 站没有库标识，直接跑「运行态定格审计」。确认不是这几类，再进入下面的动效提取。
 
 ---
@@ -99,7 +101,10 @@ C=clone/assets/_next/static/chunks   # 按实际路径调整；Next 的路由目
 for pat in 'whileHover' 'whileTap' 'whileInView|useInView' 'useScroll|scrollYProgress' \
            'setInterval' 'AnimatePresence' 'animate:\{' 'variants:' \
            'enterFrom|leaveTo' 'IntersectionObserver' 'particle|canvas' 'onMouseEnter' \
-           'animationend|animationstart'; do
+           'animationend|animationstart' 'transitionend' 'requestAnimationFrame' \
+           'addEventListener\("scroll"|onScroll' 'mousemove|pointermove' \
+           '\.animate\(\[|\.animate\(\{' 'registerProperty' 'startViewTransition' \
+           'lenis|locomotive|smooth-scroll' 'lottie|\.riv|spline' 'typed|SplitType|splitting'; do
   echo "== $pat =="; find "$C" -name '*.js' -exec grep -lE "$pat" {} + 2>/dev/null
 done
 # 对每个命中文件，提取参数上下文：
@@ -131,6 +136,49 @@ grep -oE '.{150}whileHover.{250}' <chunk>   # 窗口按需放大
 
 1. `String.replace('</body>', 补丁)` 的替换串里若含 `$'`、`$\``（如价格拼接 `'$' +`），会被当作特殊替换模式展开导致脚本损坏——**始终用函数形式** `html.replace('</body>', () => 补丁)`。
 2. 用 JS 模板字符串包裹注入脚本时，`\$`、`\\` 等转义会被模板字符串先消费一层（`/\$/` 送达后变成 `/$/`，守卫恒真）——正则守卫改用 `indexOf` 等无反斜杠写法，或对反斜杠双重转义。
+
+### 一.5.1 动画形式全景（常见类型之外的盲区，逐类核对）
+
+上面的原语表覆盖 React/framer 生态最常见的形态。换一个技术栈的站点，还有以下四大类，**每次复刻都过一遍这张清单**：
+
+**① JS 原语类（已并入上方扫描列表，症状与处置）**
+
+| 原语 | 动效类型 | ⚠️ 陷阱 |
+|---|---|---|
+| `requestAnimationFrame` 业务循环 | 数字滚动计数器、打字机、canvas 图表/场景 | 计数器会定格在快照瞬间的中间值（如 "1,283"），静态看毫无异常 |
+| `setTimeout` 递归 | 打字机、逐字/逐行错峰入场 | 同上，文字定格在半句 |
+| `transitionend` 接力 | transition 链循环（与 animationend 重启同族） | 跑一段后停住 |
+| `addEventListener('scroll')` 原生监听 | 非 framer 站的视差/吸顶/进度条 | 无库特征，只能靠原语 grep |
+| `mousemove`/`pointermove` | 鼠标跟随光斑（spotlight）、3D 倾斜卡（tilt）、自定义光标 | 静态快照完全不可见，纯交互态 |
+| `element.animate([...])`（WAAPI） | 无库的 JS 动画 | 剥离 JS 后无任何 CSS 痕迹 |
+| `CSS.registerProperty`（Houdini） | 渐变角度/自定义属性的 transition | **CSS 里写着 transition 却不动**：属性注册在 JS 里，剥离后 CSS 过渡静默失效，极难察觉。判定口径：CSS 里发现自定义属性参与 transition/animation 时，先 grep CSS `@property`——命中即存活（纯 CSS）；未命中则 grep bundle `registerProperty`——命中即需在 clone 里补一段注册代码 |
+| `startViewTransition` | SPA 页面切换过渡 | 单页克隆可放弃，记录即可 |
+
+**② CSS 原生类（剥离 JS 后仍存活，但有各自注意点）**
+
+| 形式 | 识别 | 注意点 |
+|---|---|---|
+| CSS 滚动驱动动画 `animation-timeline: scroll()/view()` | grep CSS：`animation-timeline\|view-timeline` | 纯 CSS 免复刻；但 capture 冻结样式会定格它，截图基线注意 |
+| `@property` 声明在 CSS 里 | grep CSS：`@property` | 与 JS 注册版区分：CSS 版存活，JS 版死亡（见①） |
+| `<details>/<summary>`、`:checked` 手风琴 | DOM 里有对应标签/input | 原生交互，免复刻；序列化的 open 状态要还原初始态 |
+| SVG SMIL（`<animate>`/`<animateTransform>`/`<animateMotion>`） | grep DOM：`<animate` | 声明式，序列化后原生运行；`begin="click"` 等交互触发需测 |
+
+**③ 动画资产类（动的不是 DOM，是资产本身）**
+
+| 形式 | 识别 | 处置 |
+|---|---|---|
+| `<video autoplay loop muted>` 背景 | DOM `<video>` + network.json media 类型 | 视频文件必须本地化（大文件注意）+ poster 图 |
+| GIF / APNG / 动图 WebP·AVIF | `file` 探测资产真实类型（"animated"字样） | 静态截图只有一帧，像素 diff 全绿但内容在动——资产照搬即可，登记确认 |
+| Lottie（`lottie-web`/`<lottie-player>`/`.json`/`.lottie`）、Rive（`.riv`）、Spline（`spline-viewer`） | bundle/DOM/network 三处 grep | 运行时 + 动画数据文件都要本地化；web component 注意 ④ 的 shadow DOM 坑 |
+
+**④ 结构陷阱类（不是动画形式，但会吞掉动画）**
+
+| 陷阱 | 后果 | 检测与处置 |
+|---|---|---|
+| **Shadow DOM**（`<swiper-container>`、`<lottie-player>` 等 web component） | `page.content()` **不含 shadowRoot 内容**——组件内部 DOM/样式/动画在快照里整体消失 | capture 前 evaluate：`[...document.querySelectorAll('*')].filter(e=>e.shadowRoot).map(e=>e.tagName)`；命中则必须让组件库 JS 在 clone 里重建，或手工展开为 light DOM |
+| iframe 嵌入（视频播放器/地图/codepen） | 独立文档，capture 不进入 | 单独抓取或保留外链并登记 |
+| 平滑滚动劫持（lenis / locomotive-scroll / smooth-scrollbar） | 所有滚动动效的时序被库接管；clone 剥离后滚动手感/触发点不一致 | grep bundle：`lenis\|locomotive`；决定复刻滚动容器或接受原生滚动并重校触发点 |
+| `prefers-reduced-motion` 分支 | 原站对减动效用户走另一套样式 | 验证时两种模式各跑一遍 |
 
 ---
 
