@@ -29,6 +29,8 @@ for (const w of [1440, 768, 375]) {
   await page.waitForTimeout(800);
   // 停表 + 轮播归零
   await page.evaluate(() => {
+    // 剥离克隆侧静态重建的三方 UI（data-rep-3p 标记），与原站侧 --block-3p 屏蔽对齐
+    document.querySelectorAll('[data-rep-3p]').forEach(el => el.remove());
     (window.__ivs || []).forEach(clearInterval);
     (window.__tos || []).forEach(clearTimeout);
     const $ = window.jQuery;

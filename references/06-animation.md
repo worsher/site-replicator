@@ -177,7 +177,7 @@ grep -oE '.{150}whileHover.{250}' <chunk>   # 窗口按需放大
 | 陷阱 | 后果 | 检测与处置 |
 |---|---|---|
 | **Shadow DOM**（`<swiper-container>`、`<lottie-player>` 等 web component） | `page.content()` **不含 shadowRoot 内容**——组件内部 DOM/样式/动画在快照里整体消失 | capture 前 evaluate：`[...document.querySelectorAll('*')].filter(e=>e.shadowRoot).map(e=>e.tagName)`；命中则必须让组件库 JS 在 clone 里重建，或手工展开为 light DOM |
-| iframe 嵌入（视频播放器/地图/codepen） | 独立文档，capture 不进入 | 单独抓取或保留外链并登记 |
+| iframe 嵌入（视频播放器/地图/codepen/营销弹窗挂件） | 独立文档，capture 不进入——**快照里只有 iframe 壳，UI 整体缺失** | 单独抓取或保留外链并登记；用户要求保留视觉时**照运行时截图静态重建**（布局/文案 1:1，远程配置产物如头像照片用占位近似），重建件打 `data-rep-3p` 属性——det-shot 会在克隆侧剥离它，与原站侧 `--block-3p` 屏蔽保持两侧对齐，不污染验证门控 |
 | 平滑滚动劫持（lenis / locomotive-scroll / smooth-scrollbar） | 所有滚动动效的时序被库接管；clone 剥离后滚动手感/触发点不一致 | grep bundle：`lenis\|locomotive`；决定复刻滚动容器或接受原生滚动并重校触发点 |
 | `prefers-reduced-motion` 分支 | 原站对减动效用户走另一套样式 | 验证时两种模式各跑一遍 |
 
